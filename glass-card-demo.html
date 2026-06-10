@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>液态玻璃卡片演示</title>
+<style>
+  /* ============================================================
+     CSS 自定义属性（主题变量）
+     所有视觉参数集中管理，支持浅色/深色一键切换
+     ============================================================ */
+  :root {
+    /* ---- 玻璃参数 ---- */
+    --glass-blur: 40px;           /* 高斯模糊半径，30-50px 之间 */
+    --glass-radius: 20px;         /* 卡片圆角 */
+    --glass-padding: 24px;        /* 卡片内边距 */
+    --glass-border-width: 1px;    /* 描边宽度 */
+
+    /* ---- 浅色主题（默认） ---- */
+    --glass-bg-tint: rgba(255, 255, 255, 0.28);   /* 半透明白色叠加 → 亮色 Vibrance */
+    --glass-bg-blend: rgba(255, 255, 255, 0.06);  /* 底层微光，强化通透感 */
+    --glass-border: rgba(255, 255, 255, 0.50);    /* 描边：高亮模拟玻璃边缘折射 */
+    --glass-highlight: rgba(255, 255, 255, 0.35); /* 内高光：模拟玻璃厚度 */
+
+    --glass-shadow-1: rgba(0, 0, 0, 0.04);  /* 外层柔影 */
+    --glass-shadow-2: rgba(0, 0, 0, 0.06);  /* 中层景深 */
+    --glass-shadow-3: rgba(0, 0, 0, 0.02);  /* 内层微影 */
+
+    --text-primary: #1a1a2e;
+    --text-secondary: #555;
+    --text-muted: #888;
+  }
+
+  /* ---- 深色主题 ---- */
+  [data-theme="dark"] {
+    --glass-bg-tint: rgba(30, 35, 50, 0.45);      /* 深色半透明叠加 */
+    --glass-bg-blend: rgba(120, 140, 255, 0.04);  /* 极淡冷色调 → 深色 Vibrance */
+    --glass-border: rgba(255, 255, 255, 0.12);    /* 深色下边缘更收敛 */
+    --glass-highlight: rgba(255, 255, 255, 0.06); /* 微弱内高光 */
+
+    --glass-shadow-1: rgba(0, 0, 0, 0.30);
+    --glass-shadow-2: rgba(0, 0, 0, 0.40);
+    --glass-shadow-3: rgba(0, 0, 0, 0.15);
+
+    --text-primary: #e8e8f0;
+    --text-secondary: #a8a8b8;
+    --text-muted: #707080;
+  }
+
+  /* ============================================================
+     基底样式
+     ============================================================ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.4s ease;
+  }
+
+  /* ---- 多彩渐变背景，展示玻璃动态反射 ---- */
+  .demo-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 10% 20%,   rgba(255, 120, 100, 0.50), transparent),
+      radial-gradient(ellipse 60% 50% at 90% 80%,   rgba(80, 180, 255, 0.45), transparent),
+      radial-gradient(ellipse 50% 50% at 50% 50%,   rgba(180, 80, 255, 0.25), transparent),
+      radial-gradient(ellipse 100% 80% at 50% 100%, rgba(255, 200, 50, 0.30), transparent),
+      linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    background-blend-mode: normal, normal, normal, normal, normal;
+  }
+
+  /* 浅色模式背景 */
+  body:not([data-theme="dark"]) .demo-bg {
+    background:
+      radial-gradient(ellipse 80% 60% at 10% 20%,   rgba(255, 150, 130, 0.35), transparent),
+      radial-gradient(ellipse 60% 50% at 90% 80%,   rgba(100, 200, 255, 0.30), transparent),
+      radial-gradient(ellipse 50% 50% at 50% 50%,   rgba(200, 120, 255, 0.15), transparent),
+      radial-gradient(ellipse 100% 80% at 50% 100%, rgba(255, 210, 80, 0.20), transparent),
+      linear-gradient(135deg, #e8e0f0, #f0e8ff, #e0e8f8);
+  }
+
+  /* ---- 容器：卡片居中，包含切换按钮 ---- */
+  .container {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    width: 380px;
+  }
+
+  /* ============================================================
+     核心：液态玻璃卡片
+     ============================================================
+     原理说明：
+     1. backdrop-filter: blur() —— 对卡片后方内容做高斯模糊，
+        产生"磨砂玻璃"的物理基础。硬件加速（GPU composite）。
+     2. background 三层叠加 —— 半透明白/色基底 + 渐变光晕，
+        模拟玻璃的"浸透色"（Vibrance）：背景内容颜色透过半透层
+        与渐变叠加色混合，形成随背景动态变化的观感。
+     3. box-shadow 四层 ——
+        - 外部柔影：模拟玻璃下方阴影，增加景深。
+        - 内阴影（inset）：用白色半透明制造"内高光"，
+          模拟玻璃边缘厚度对光线的折射。
+        - 内阴影（inset）深色：控制边缘对比，让厚度更真实。
+     4. border 半透明 —— 模拟玻璃切面的边缘折射光。
+     5. 伪元素 ::after（可选）额外光晕层，强化 Vibrance 效果。
+     ============================================================ */
+  .glass-card {
+    position: relative;
+    width: 100%;
+    padding: var(--glass-padding);
+
+    /* ---- 核心模糊 ---- */
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+
+    /* ---- 色彩叠加层（Vibrance 核心） ---- */
+    /*
+      第一层：半透明白/深色基底，决定玻璃的明度基调。
+      第二层：径向渐变 + 叠加 blend，让背景颜色"浸入"玻璃。
+      两层叠加使卡片颜色随后方内容动态变化。
+    */
+    background:
+      radial-gradient(
+        120% 120% at 40% 30%,
+        transparent 40%,
+        var(--glass-bg-blend) 100%
+      ),
+      var(--glass-bg-tint);
+
+    /* ---- 玻璃厚度与折射 ---- */
+    border: var(--glass-border-width) solid var(--glass-border);
+    border-radius: var(--glass-radius);
+
+    /* ---- 多层阴影：外柔影 + 内高光 + 景深 ---- */
+    /*
+      阴影层拆解（从外到内）：
+      1. 0 0 0 1px var(--glass-highlight) inset
+         → 最内层 1px 白色/淡色高光线，模拟玻璃切面的"边缘光"，
+           即光线从玻璃截面穿透时的高亮折射。
+      2. 0 8px 32px var(--glass-shadow-1)
+         → 外层大半径柔影，让卡片"浮"在背景上，增强景深。
+      3. 0 2px 8px var(--glass-shadow-2)
+         → 中层近距阴影，增加接触面真实感。
+      4. 0 1px 3px var(--glass-shadow-3)
+         → 最贴合的微影，消除悬浮感。
+    */
+    box-shadow:
+      0 0 0 1px var(--glass-highlight) inset,
+      0 8px 32px var(--glass-shadow-1),
+      0 2px 8px var(--glass-shadow-2),
+      0 1px 3px var(--glass-shadow-3);
+
+    /* ---- 硬件加速提示 ---- */
+    will-change: transform;
+    transform: translateZ(0);
+
+    /* ---- 文字颜色 ---- */
+    color: var(--text-primary);
+    transition:
+      background 0.3s ease,
+      backdrop-filter 0.3s ease,
+      box-shadow 0.3s ease;
+  }
+
+  /* ---- 二层 Vibrance 光晕（可选增强） ---- */
+  /*
+    用伪元素叠加一层极淡的径向渐变，中心偏左上，
+    模拟环境光在玻璃表面的"浸入感"。
+    这层叠加在 border 之下，与 backdrop-filter 内容混合。
+  */
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: var(--glass-border-width);
+    background: radial-gradient(
+      100% 100% at 20% 20%,
+      rgba(255, 255, 255, 0.10) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+    /* 不叠加 mix-blend-mode，避免与 backdrop-filter 冲突；
+       直接用透明渐变叠加到 background 之上。 */
+  }
+
+  /* ---- 内容容器，确保在伪元素上方 ---- */
+  .glass-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ============================================================
+     卡片内部排版（演示用）
+     ============================================================ */
+  .glass-card h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+  }
+
+  .glass-card p {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+
+  .glass-card .muted {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 12px;
+  }
+
+  .glass-card .icon-row {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0 8px;
+  }
+
+  .glass-card .icon-row span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    font-size: 1.2rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+  }
+
+  /* ---- 主题切换按钮 ---- */
+  .theme-toggle {
+    position: relative;
+    z-index: 2;
+    padding: 8px 20px;
+    border-radius: 100px;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg-tint);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+  }
+  .theme-toggle:hover {
+    background: var(--glass-highlight);
+  }
+
+  /* ============================================================
+     边缘防黑边（Electron 透明窗口）
+     Electron 中 transparent: true 时，border-radius 边缘
+     可能出现黑边/锯齿。解决：
+     1. 使用 background-clip: padding-box 阻止背景溢出到 border 区域。
+     2. 父容器添加 overflow: hidden 配合 isolation: isolate。
+     ============================================================ */
+  .glass-card {
+    background-clip: padding-box;  /* 背景裁切到 padding-box，防止透出 border 造成黑边 */
+    isolation: isolate;           /* 创建新层叠上下文，隔离混合 */
+  }
+
+  /* ============================================================
+     纯 CSS 类版本（可直接拷走集成）
+     使用方式：
+       1. 将下方 :root 中的变量复制到你的 :root
+       2. 将 .glass-card 类复制到你的 CSS
+       3. 添加 data-theme="dark" 属性切换深色
+       4. HTML: <div class="glass-card">...</div>
+     ============================================================ */
+
+  /* -- 以下为可直接集成的独立类 -- */
+  /*
+    使用方法：
+    <link rel="stylesheet" href="glass.css">
+    <div class="glass-card">content</div>
+
+    变量已在 :root 中定义，可覆盖。
+    深色模式在父级 [data-theme="dark"] 下自动生效。
+  */
+</style>
+</head>
+<body>
+
+<div class="demo-bg"></div>
+
+<div class="container">
+  <!-- 液态玻璃卡片 -->
+  <div class="glass-card">
+    <h2>✦ 液态玻璃卡片</h2>
+    <p>
+      backdrop-filter 模糊半径 <strong>40px</strong>，叠加半透明渐变层模拟
+      Vibrance 效果。边缘内高光 + 半透明描边，模拟玻璃厚度与折射。
+    </p>
+    <div class="icon-row">
+      <span>🔮</span>
+      <span>✨</span>
+      <span>💎</span>
+      <span>🌊</span>
+    </div>
+    <p class="muted">
+      背景彩色渐变会实时"浸透"卡片，因 backdrop-filter 对底层内容实时模糊，
+      加上半透叠色层后色彩自然融合，形成动态液态视觉。
+    </p>
+  </div>
+
+  <!-- 第二张卡片：不同圆角/内边距，验证可配置性 -->
+  <div class="glass-card" style="--glass-radius: 12px; --glass-padding: 18px; --glass-blur: 35px;">
+    <p><strong>可配置参数演示</strong> &nbsp;圆角 12px · 内边距 18px · 模糊 35px</p>
+    <p class="muted">
+      通过覆盖 --glass-radius / --glass-padding / --glass-blur 变量即可，
+      无需修改其他样式。
+    </p>
+  </div>
+
+  <button class="theme-toggle" onclick="toggleTheme()">🌓 切换主题</button>
+</div>
+
+<script>
+  function toggleTheme() {
+    const root = document.documentElement;
+    const isDark = root.getAttribute('data-theme') === 'dark';
+    root.setAttribute('data-theme', isDark ? '' : 'dark');
+  }
+</script>
+
+</body>
+</html>
