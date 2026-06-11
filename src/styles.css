@@ -135,9 +135,40 @@ button {
   letter-spacing: 0;
 }
 
-/* 标题区子元素穿透点击，让 data-tauri-drag-region 拖拽生效（按钮不在这些容器内，不受影响） */
-.title-lockup > *,
-.settings-header > *,
+.provider-toggle {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  pointer-events: auto;
+  transition: opacity 0.15s;
+}
+
+.provider-toggle:hover {
+  opacity: 0.7;
+}
+
+.provider-arrow {
+  font-size: 13px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.provider-toggle:hover .provider-arrow {
+  opacity: 0.8;
+}
+
+/* 标题区子元素穿透点击，让 data-tauri-drag-region 拖拽生效 */
+.title-lockup > :not(.provider-toggle),
+.settings-header > :not(.provider-toggle),
 .detail-hero > * {
   pointer-events: none;
 }
@@ -539,6 +570,10 @@ button {
 
 .cache-bar .seg.response {
   background: #a78bfa;
+}
+
+.cache-bar .seg.mimo-tokens {
+  background: #60a5fa;
 }
 
 .cache-bar .seg.empty {
@@ -990,6 +1025,7 @@ button:disabled {
 .detail-bar-stacked .seg.hit    { background: #34d399; }
 .detail-bar-stacked .seg.miss   { background: var(--orange); }
 .detail-bar-stacked .seg.response { background: #a78bfa; }
+.detail-bar-stacked .seg.mimo-tokens { background: #60a5fa; }
 .detail-bar-stacked .seg.empty  {
   flex-grow: 1;      /* 空数据占位段填满 MIN_BAR 高度的柱子 */
   min-height: 0;
@@ -1118,6 +1154,10 @@ button:disabled {
   background: #a78bfa;
 }
 
+.bar-tooltip-row .dot.mimo-tokens {
+  background: #60a5fa;
+}
+
 .bar-tooltip-row strong {
   float: none;
   margin-left: auto;
@@ -1155,6 +1195,7 @@ button:disabled {
 .chart-legend-item .dot.hit    { background: #34d399; }
 .chart-legend-item .dot.miss   { background: var(--orange); }
 .chart-legend-item .dot.response { background: #a78bfa; }
+.chart-legend-item .dot.mimo-tokens { background: #60a5fa; }
 
 .detail-bar-column em {
   color: var(--text-faint);
@@ -1257,6 +1298,13 @@ button:disabled {
 [data-theme="light"] .chart-legend-item .dot.response,
 [data-theme="light"] .bar-tooltip-row .dot.response {
   background: #8b5cf6;
+}
+
+[data-theme="light"] .detail-bar-stacked .seg.mimo-tokens,
+[data-theme="light"] .cache-bar .seg.mimo-tokens,
+[data-theme="light"] .chart-legend-item .dot.mimo-tokens,
+[data-theme="light"] .bar-tooltip-row .dot.mimo-tokens {
+  background: #3b82f6;
 }
 
 [data-theme="light"] .detail-chart {

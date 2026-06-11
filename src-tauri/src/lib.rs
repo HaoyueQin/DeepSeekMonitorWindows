@@ -2,18 +2,20 @@
 pub fn run() {
     use serde::{Deserialize, Serialize};
     use std::{
+        collections::HashMap,
         fs,
         io::Read,
         os::windows::fs::OpenOptionsExt,
         path::{Path, PathBuf},
         process::Command,
         sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
+            atomic::{AtomicBool, AtomicU16, Ordering},
+            Arc, Mutex,
         },
         thread,
         time::Duration,
     };
+    use tokio::sync::oneshot;
     use tauri::{
         menu::{Menu, MenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -26,6 +28,10 @@ pub fn run() {
         api_key: Option<String>,
         #[serde(default)]
         usage_token: Option<String>,
+        #[serde(default)]
+        provider: String, // "deepseek" | "mimo"
+        #[serde(default)]
+        mimo_token: Option<String>,
         refresh_interval_seconds: u64,
         #[serde(default)]
         auto_refresh_enabled: bool,
@@ -38,6 +44,8 @@ pub fn run() {
         api_key_configured: bool,
         api_key_preview: Option<String>,
         usage_token_configured: bool,
+        provider: String,
+        mimo_token_configured: bool,
         refresh_interval_seconds: u64,
         auto_refresh_enabled: bool,
         autostart: bool,
@@ -117,10 +125,22 @@ pub fn run() {
             .map(|value| !value.is_empty())
             .unwrap_or(false);
 
+        let mimo_token_configured = config
+            .mimo_token
+            .as_ref()
+            .map(|value| !value.is_empty())
+            .unwrap_or(false);
+
         Ok(AppConfig {
             api_key_configured: api_key_preview.is_some(),
             api_key_preview,
             usage_token_configured,
+            provider: if config.provider.is_empty() {
+                "deepseek".to_string()
+            } else {
+                config.provider.clone()
+            },
+            mimo_token_configured,
             refresh_interval_seconds: config.refresh_interval_seconds,
             auto_refresh_enabled: config.auto_refresh_enabled,
             autostart: config.autostart,
@@ -899,6 +919,416 @@ pub fn run() {
         })
     }
 
+    #[tauri::command]
+    fn set_provider(provider: String) -> Result<AppConfig, String> {
+        if provider != "deepseek" && provider != "mimo" {
+            return Err("无效的 provider，仅支持 deepseek 或 mimo".to_string());
+        }
+        let mut config = read_stored_config()?;
+        config.provider = provider;
+        write_stored_config(&config)?;
+        to_app_config(config)
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MimoBalanceResult {
+        available_balance: String,
+        currency: String,
+        total_consumption: String,
+        monthly_expense: String,
+    }
+
+    #[tauri::command]
+    fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+        if let Some(window) = app.get_webview_window("mimo-sync") {
+            return Ok(window);
+        }
+        let url = tauri::WebviewUrl::External(
+            "https://platform.xiaomimimo.com/console/balance".parse().unwrap(),
+        );
+        tauri::WebviewWindowBuilder::new(app, "mimo-sync", url)
+            .title("小米 MiMo 控制台 - 登录后保持此窗口打开")
+            .inner_size(480.0, 720.0)
+            .min_inner_size(360.0, 480.0)
+            .resizable(true)
+            .center()
+            .visible(true)
+            .build()
+            .map_err(|error| format!("打开 MiMo 页面失败：{error}"))
+    }
+
+    async fn fetch_mimo_api(
+        app: &tauri::AppHandle,
+        path: &str,
+        timeout_secs: u64,
+    ) -> Result<String, String> {
+        use tiny_http::{Header, Method, Response, Server};
+
+        // 串行化 webview 访问，防止并发导航互相中断
+        let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
+        let _lock = lock_guard.lock().await;
+
+        let window = ensure_mimo_webview_sync(app)?;
+        let api_url: tauri::Url = format!("https://platform.xiaomimimo.com{path}")
+            .parse()
+            .map_err(|_| "无效 API URL".to_string())?;
+
+        // 生成唯一请求 ID
+        let req_id = format!(
+            "__mimo_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+
+        // 创建 oneshot 通道，发送端存入托管状态
+        let (tx, rx) = oneshot::channel();
+        {
+            let state =
+                app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+            let mut map = state.lock().unwrap();
+            map.insert(req_id.clone(), tx);
+        }
+
+        // 启动本地 HTTP 服务器线程
+        let port = Arc::new(AtomicU16::new(0));
+        let port_clone = Arc::clone(&port);
+        let shared_map = {
+            let state =
+                app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+            Arc::clone(&state)
+        };
+        let _server_thread = std::thread::spawn(move || {
+            let server = match Server::http("127.0.0.1:0") {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            if let Some(addr) = server.server_addr().to_ip() {
+                port_clone.store(addr.port(), Ordering::SeqCst);
+            } else {
+                return;
+            }
+
+            // 处理最多 2 个请求：OPTIONS 预检 + POST
+            for _ in 0..2 {
+                if let Ok(mut request) = server.recv() {
+                    if *request.method() == Method::Options {
+                        let response = Response::from_string(String::new())
+                            .with_header(
+                                Header::from_bytes(
+                                    &b"Access-Control-Allow-Origin"[..],
+                                    &b"*"[..],
+                                )
+                                .unwrap(),
+                            )
+                            .with_header(
+                                Header::from_bytes(
+                                    &b"Access-Control-Allow-Methods"[..],
+                                    &b"POST, OPTIONS"[..],
+                                )
+                                .unwrap(),
+                            )
+                            .with_header(
+                                Header::from_bytes(
+                                    &b"Access-Control-Allow-Headers"[..],
+                                    &b"Content-Type"[..],
+                                )
+                                .unwrap(),
+                            );
+                        let _ = request.respond(response);
+                    } else {
+                        let mut body = String::new();
+                        let _ = request.as_reader().read_to_string(&mut body);
+
+                        if let Ok(parsed) =
+                            serde_json::from_str::<serde_json::Value>(&body)
+                        {
+                            if let (Some(rid), Some(data)) = (
+                                parsed.get("reqId").and_then(|v| v.as_str()),
+                                parsed.get("data").and_then(|v| v.as_str()),
+                            ) {
+                                let mut map = shared_map.lock().unwrap();
+                                if let Some(tx) = map.remove(rid) {
+                                    let _ = tx.send(data.to_string());
+                                }
+                            }
+                        }
+
+                        let response = Response::from_string("OK".to_string())
+                            .with_header(
+                                Header::from_bytes(
+                                    &b"Access-Control-Allow-Origin"[..],
+                                    &b"*"[..],
+                                )
+                                .unwrap(),
+                            );
+                        let _ = request.respond(response);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // 等待服务器启动并获取端口
+        let start = std::time::Instant::now();
+        let actual_port = loop {
+            let p = port.load(Ordering::SeqCst);
+            if p != 0 {
+                break p;
+            }
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                return Err("HTTP 服务器启动超时".to_string());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+
+        // 导航到 API URL
+        let _ = window.navigate(api_url);
+
+        // 等待页面加载
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        // 注入 JS 将页面内容 POST 到本地服务器
+        let js = format!(
+            r#"try {{
+                var text = document.body ? (document.body.innerText || '') : '';
+                fetch('http://127.0.0.1:{port}/mimo-callback', {{
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ reqId: '{req_id}', data: text }})
+                }});
+            }} catch(e) {{
+                console.error(e);
+            }}"#,
+            port = actual_port,
+            req_id = req_id,
+        );
+        window.eval(&js).map_err(|e| format!("注入脚本失败：{e}"))?;
+
+        // 等待 oneshot 接收端数据（带超时）
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(data)) => {
+                if data.is_empty() || data.starts_with('<') {
+                    return Err(
+                        "导航到 API 后页面内容为空或为 HTML，请确认已登录 MiMo 账号"
+                            .to_string(),
+                    );
+                }
+                Ok(data)
+            }
+            Ok(Err(_)) => Err("数据接收通道关闭".to_string()),
+            Err(_) => {
+                // 超时后清理状态中的发送端
+                let state =
+                    app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                let mut map = state.lock().unwrap();
+                map.remove(&req_id);
+                Err("MiMo API 请求超时".to_string())
+            }
+        }
+    }
+
+    fn parse_mimo_api_response<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, String> {
+        #[derive(Deserialize)]
+        struct ApiEnvelope<T2> {
+            code: i32,
+            #[allow(dead_code)]
+            message: String,
+            data: Option<T2>,
+        }
+        let envelope: ApiEnvelope<T> =
+            serde_json::from_str(json).map_err(|e| format!("解析响应失败：{e}"))?;
+        if envelope.code != 0 {
+            return Err(format!("MiMo API 返回错误 code={}: {}", envelope.code, envelope.message));
+        }
+        envelope.data.ok_or_else(|| "MiMo API 返回空数据".to_string())
+    }
+
+    #[tauri::command]
+    async fn fetch_mimo_balance(app: tauri::AppHandle) -> Result<MimoBalanceResult, String> {
+        let json = fetch_mimo_api(&app, "/api/v1/balance", 15).await?;
+
+        // 尝试解析为原始余额格式
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BalanceDataV1 {
+            #[allow(dead_code)]
+            #[serde(default)]
+            balance: String,
+            #[allow(dead_code)]
+            #[serde(default)]
+            frozen_balance: String,
+            #[serde(default)]
+            currency: String,
+            #[serde(default)]
+            cash_balance: String,
+        }
+        if let Ok(data) = parse_mimo_api_response::<BalanceDataV1>(&json) {
+            return Ok(MimoBalanceResult {
+                available_balance: data.cash_balance,
+                currency: if data.currency.is_empty() { "CNY".to_string() } else { data.currency },
+                total_consumption: "—".to_string(),
+                monthly_expense: "—".to_string(),
+            });
+        }
+
+        // 新格式：账户概览（包含 costUsage）
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CostUsageData {
+            #[serde(default)]
+            total_cost: String,
+            #[serde(default)]
+            current_month_cost: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AccountOverview {
+            #[serde(default)]
+            cost_usage: Option<CostUsageData>,
+        }
+        if let Ok(overview) = parse_mimo_api_response::<AccountOverview>(&json) {
+            if let Some(cost) = overview.cost_usage {
+                return Ok(MimoBalanceResult {
+                    available_balance: cost.total_cost.clone(),
+                    currency: "CNY".to_string(),
+                    total_consumption: cost.total_cost,
+                    monthly_expense: cost.current_month_cost,
+                });
+            }
+        }
+
+        Err("无法解析 MiMo 余额接口返回的数据".to_string())
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MimoUsageModel {
+        key: String,
+        name: String,
+        total_tokens: u64,
+        request_count: u64,
+        cache_hit_tokens: u64,
+        cache_miss_tokens: u64,
+        response_tokens: u64,
+        cost: f64,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MimoUsageDay {
+        date: String,
+        total_tokens: u64,
+        total_cost: f64,
+    }
+
+    #[derive(Debug, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MimoUsageResult {
+        models: Vec<MimoUsageModel>,
+        days: Vec<MimoUsageDay>,
+        month_cost: f64,
+    }
+    #[tauri::command]
+    async fn fetch_mimo_usage(app: tauri::AppHandle, _month: u32, _year: u32) -> Result<MimoUsageResult, String> {
+        // 从 /api/v1/balance 返回的概览中取 token 用量作为模型数据
+        let overview_json = fetch_mimo_api(&app, "/api/v1/balance", 15).await?;
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct TokenUsageData {
+            #[serde(default)]
+            input_token: u64,
+            #[serde(default)]
+            output_token: u64,
+            #[serde(default)]
+            cache_token: u64,
+            #[allow(dead_code)]
+            #[serde(default)]
+            total_token: u64,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CostUsageData {
+            #[allow(dead_code)]
+            #[serde(default)]
+            total_cost: String,
+            #[serde(default)]
+            current_month_cost: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AccountOverview {
+            #[serde(default)]
+            token_usage: Option<TokenUsageData>,
+            #[serde(default)]
+            cost_usage: Option<CostUsageData>,
+        }
+        if let Ok(overview) = parse_mimo_api_response::<AccountOverview>(&overview_json) {
+            let month_cost = overview.cost_usage.as_ref()
+                .and_then(|c| c.current_month_cost.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let mut models = Vec::new();
+            if let Some(tokens) = &overview.token_usage {
+                if tokens.input_token > 0 {
+                    models.push(MimoUsageModel {
+                        key: "input".to_string(), name: "输入 Tokens".to_string(),
+                        total_tokens: tokens.input_token, request_count: 0,
+                        cache_hit_tokens: tokens.cache_token, cache_miss_tokens: tokens.input_token.saturating_sub(tokens.cache_token),
+                        response_tokens: tokens.output_token, cost: 0.0,
+                    });
+                }
+                if tokens.output_token > 0 {
+                    models.push(MimoUsageModel {
+                        key: "output".to_string(), name: "输出 Tokens".to_string(),
+                        total_tokens: tokens.output_token, request_count: 0,
+                        cache_hit_tokens: 0, cache_miss_tokens: 0,
+                        response_tokens: tokens.output_token, cost: 0.0,
+                    });
+                }
+            }
+            return Ok(MimoUsageResult { models, days: vec![], month_cost });
+        }
+
+        Err("无法解析 MiMo 用量数据".to_string())
+    }
+
+    // 通过保持 webview 窗口打开，从 SPA 页面的 DOM 提取数据（因为 HttpOnly Cookie 无法从 JS 读取）。
+    // Webview 共享同一域名的 cookie，嵌入 JS 通过 fetch + credentials: 'include' 发送请求。
+
+    #[tauri::command]
+    async fn start_mimo_sync(app: tauri::AppHandle) -> Result<bool, String> {
+        if let Some(window) = app.get_webview_window("mimo-sync") {
+            let _ = window.set_focus();
+            return Ok(true);
+        }
+        ensure_mimo_webview_sync(&app)?;
+        let _ = app.emit("mimo-sync-started", ());
+        Ok(false)
+    }
+
+    #[tauri::command]
+    async fn ensure_mimo_webview(app: tauri::AppHandle) -> Result<(), String> {
+        ensure_mimo_webview_sync(&app).map(|_| ())
+    }
+
+    #[tauri::command]
+    fn mimo_api_response(
+        app: tauri::AppHandle,
+        req_id: String,
+        json: String,
+    ) -> Result<(), String> {
+        let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+        let mut map = state.lock().unwrap();
+        if let Some(tx) = map.remove(&req_id) {
+            let _ = tx.send(json);
+        }
+        Ok(())
+    }
+
     tauri::Builder::default()
         // 单实例守卫：必须作为第一个注册的插件。
         // 程序已运行时再次启动 exe，第二个进程不会新开窗口，
@@ -909,6 +1339,11 @@ pub fn run() {
             }
         }))
         .manage(Arc::new(AtomicBool::new(false)))
+        .manage(Arc::new(Mutex::new(HashMap::<
+            String,
+            oneshot::Sender<String>,
+        >::new())))
+        .manage(Arc::new(tokio::sync::Mutex::new(())))
         .invoke_handler(tauri::generate_handler![
             hide_main_window,
             get_app_config,
@@ -917,12 +1352,18 @@ pub fn run() {
             save_refresh_interval,
             save_auto_refresh_enabled,
             save_autostart,
+            set_provider,
             fetch_balance,
             save_usage_token,
             clear_usage_token,
             fetch_usage,
             start_usage_sync,
-            usage_token_captured
+            usage_token_captured,
+            fetch_mimo_balance,
+            fetch_mimo_usage,
+            start_mimo_sync,
+            ensure_mimo_webview,
+            mimo_api_response
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

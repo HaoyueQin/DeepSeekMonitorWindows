@@ -1,14 +1,14 @@
-# DeepSeek Monitor Windows
+# DeepSeek / MiMo Monitor Windows
 
-DeepSeek Monitor Windows 是一个面向 Windows 的 DeepSeek API 用量监控桌面应用，用于查看账户余额、当月消费、模型 Token 用量和最近用量趋势。
+DeepSeek / MiMo Monitor Windows 是一个面向 Windows 的 DeepSeek & MiMo API 用量监控桌面应用，用于查看账户余额、当月消费、模型 Token 用量和最近用量趋势。
 
 本项目基于 [JayHome137/deepseek-monitor](https://github.com/JayHome137/DeepSeekMonitor) 的开源项目思路做 Windows 系统适配，**感谢原作者 JayHome137 的开源工作**。原项目是 Python Web Dashboard，用于追踪 DeepSeek 平台多类公开变化，原项目当前仅支持mac版本。本项目开发目标是 Windows 桌面端监控工具，技术栈和使用方式已经按 Windows 平台重构实现。
 
-郑重声明：本项目不是 DeepSeek 官方产品。
+郑重声明：本项目不是 DeepSeek 官方产品，也不是 MiMo 官方产品。
 
 ## About
 
-DeepSeek Monitor Windows: Windows desktop adaptation of felikschu/deepseek-monitor, built with Tauri, React and Rust for DeepSeek balance and usage monitoring.
+DeepSeek / MiMo Monitor Windows: Windows desktop adaptation of felikschu/deepseek-monitor, built with Tauri, React and Rust for DeepSeek and MiMo balance and usage monitoring.
 
 ## 当前能力
 
@@ -19,6 +19,7 @@ DeepSeek Monitor Windows: Windows desktop adaptation of felikschu/deepseek-monit
 - 支持 Windows 托盘入口，主窗口默认不进入任务栏。
 - 支持 API Key 保存、清除和余额验证。
 - 支持用量 Token 自动同步和手动粘贴兜底。
+- **支持 MiMo 平台（开发中）**：可通过顶部切换至 MiMo 平台，查看账户余额和概览。**用量明细和模型各 Token 统计尚未完成开发。**
 - 液态玻璃质感 UI：基于 `backdrop-filter: blur()` 实现动态高斯模糊，叠加半透明渐变层模拟 Vibrance 效果，边缘内高光+半透明描边模拟玻璃厚度与折射，支持深色/浅色主题。
 - UI 复用原 macOS 版本的视觉方向，并按 Windows Tauri 窗口做适配。
 
@@ -28,7 +29,7 @@ DeepSeek Monitor Windows: Windows desktop adaptation of felikschu/deepseek-monit
 | --- | --- | --- |
 | 目标平台 | macOS / Web Dashboard | Windows 桌面端 |
 | 核心技术 | Python, Web Server, HTML Dashboard | Tauri 2, React 18, TypeScript, Rust |
-| 主要用途 | 追踪 DeepSeek 网页端、Feature Flags、API 端点、法律文档、GitHub 等公开变化 | 查看 DeepSeek API 余额、消费、Token 用量和趋势 |
+| 主要用途 | 追踪 DeepSeek 网页端、Feature Flags、API 端点、法律文档、GitHub 等公开变化 | 查看 DeepSeek/MiMo API 余额、消费、Token 用量和趋势 |
 | 启动方式 | Python 服务 + 浏览器访问 | Windows 桌面应用 |
 | 本项目是否复用原事件追踪内容 | 不复用 | 不写入 README，不作为本项目能力声明 |
 
@@ -83,6 +84,12 @@ Tauri 打包目标当前配置为 NSIS 安装包，产物位于 `src-tauri/targe
 - 粘贴后保存，作为自动同步失败时的兜底方案。
 
 **Token 可能过期。用量查询失败时，重新执行网页登录同步或手动粘贴即可。**
+
+### MiMo 平台使用说明
+
+主面板顶部可切换至 MiMo 平台。切换后会自动弹出 MiMo 网页登录窗口，登录成功后即可查看账户余额。
+
+**当前状态**：余额查询可用；用量明细（模型 Token 统计）仍在开发中，暂时显示 "—"。
 
 ## 数据存储
 
@@ -164,6 +171,19 @@ Rust 后端依赖：
 ## 更新日志
 
 完整发布记录见 GitHub Releases。
+
+### v1.2.0
+
+> **开发中版本，MiMo 用量明细尚未完成。**
+
+- **MiMo 平台支持（Beta）**：新增 MiMo 平台切换能力，通过顶部按钮在 DeepSeek 与 MiMo 之间切换。
+- **MiMo 余额查询**：通过 WebView2 内嵌 HTTP 服务器 + JavaScript Fetch 方式获取 MiMo API 数据，支持 HttpOnly Cookie 登录态透传。
+- **MiMo 模型展示**：模型行改为动态渲染，按消费金额排序取 Top 4，支持 MiMo 模型名自动映射图标（`mimo-v2.5` → flash 图标，`mimo-v2.5-pro` → pro 图标）。
+- **Provider 持久化**：当前选择的平台（DeepSeek/MiMo）存入配置文件，重启自动恢复。
+- **串行化 WebView 访问**：解决并发导航竞争导致的接口请求失败。
+- **Rust 依赖新增**：`tiny_http` 0.12 用于本地 HTTP 回调；`tokio::sync::Mutex` 用于 WebView 访问串行化。
+- **已知限制**：MiMo 用量明细（模型 Token 统计）依赖 `api-platform_ph` 动态参数，暂未打通，查无数据时不显示。
+- **液态玻璃 UI 增强**：Provider 切换按钮适配两种平台名称显示。
 
 ### v1.1.1
 

@@ -23,11 +23,14 @@ import {
 import "./styles.css";
 
 type ViewName = "dashboard" | "settings" | "detail";
-type ModelName = "flash" | "pro";
+type ModelName = "flash" | "pro" | (string & {});
+type Provider = "deepseek" | "mimo";
 type AppConfig = {
   apiKeyConfigured: boolean;
   apiKeyPreview: string | null;
   usageTokenConfigured: boolean;
+  provider: Provider;
+  mimoTokenConfigured: boolean;
   refreshIntervalSeconds: number;
   autoRefreshEnabled: boolean;
   autostart: boolean;
@@ -69,6 +72,50 @@ type UsageResult = {
   models: UsageModel[];
   days: UsageDay[];
   monthCost: number;
+};
+
+type MimoBalanceData = {
+  availableBalance: string;
+  currency: string;
+  totalConsumption: string;
+  monthlyExpense: string;
+};
+
+type MimoUsageModel = {
+  key: string;
+  name: string;
+  totalTokens: number;
+  requestCount: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  responseTokens: number;
+  cost: number;
+};
+
+type MimoUsageDay = {
+  date: string;
+  totalTokens: number;
+  totalCost: number;
+  models: Array<{ key: string; totalTokens: number; totalCost: number; }>;
+};
+
+type MimoUsageResult = {
+  models: MimoUsageModel[];
+  days: MimoUsageDay[];
+  monthCost: number;
+};
+
+const modelDisplayName = (key: string): string => {
+  const map: Record<string, string> = {
+    "mimo-v2.5": "V2.5",
+    "mimo-v2.5-pro": "V2.5 Pro",
+  };
+  return map[key] ?? key;
+};
+
+const modelIcon = (key: string): "flash" | "pro" => {
+  if (key.includes("pro")) return "pro";
+  return "flash";
 };
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString("en-US");
@@ -152,67 +199,133 @@ const refreshOptions = [
 function App() {
   const [view, setView] = React.useState<ViewName>("dashboard");
   const [model, setModel] = React.useState<ModelName>("flash");
+  const [provider, setProviderState] = React.useState<Provider>("deepseek");
 
-  const [balance, setBalance] = React.useState<BalanceData | null>(null);
+  const [balance, setBalance] = React.useState<BalanceData | MimoBalanceData | null>(null);
   const [balanceState, setBalanceState] = React.useState<BalanceState>("loading");
   const [balanceError, setBalanceError] = React.useState("");
 
-  const [usage, setUsage] = React.useState<UsageResult | null>(null);
+  const [usage, setUsage] = React.useState<UsageResult | MimoUsageResult | null>(null);
   const [usageState, setUsageState] = React.useState<BalanceState>("loading");
   const [usageError, setUsageError] = React.useState("");
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = React.useState(60);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
 
-  const loadBalance = React.useCallback(() => {
+  const setProvider = React.useCallback((next: Provider) => {
+    providerRef.current = next;
+    setProviderState(next);
+    setBalance(null);
     setBalanceState("loading");
-    void invoke<BalanceData>("fetch_balance")
-      .then((data) => {
-        setBalance(data);
-        setBalanceState("ok");
-      })
-      .catch((error) => {
-        const message = typeof error === "string" ? error : "查询失败";
-        setBalanceError(message);
-        setBalanceState(message.includes("未配置") ? "nokey" : "error");
-      });
+    setUsage(null);
+    setUsageState("loading");
+    if (next === "mimo") {
+      void invoke("ensure_mimo_webview").catch(() => {});
+    }
+    void invoke<AppConfig>("set_provider", { provider: next }).catch(() => {});
   }, []);
 
-  const loadUsage = React.useCallback(() => {
-    setUsageState("loading");
-    void fetchCurrentUsage()
-      .then((data) => {
-        setUsage(data);
-        setUsageState("ok");
-        setUsageError("");
-      })
-      .catch((error) => {
-        const message = typeof error === "string" ? error : "查询失败";
-        setUsageError(message);
-        setUsage(null);
-        setUsageState(message.includes("未配置") ? "nokey" : "error");
-      });
-  }, []);
+  const loadBalance = React.useCallback(
+    (p?: Provider) => {
+      const active = p ?? provider;
+      setBalanceState("loading");
+      const cmd = active === "deepseek" ? "fetch_balance" : "fetch_mimo_balance";
+      void invoke<BalanceData | MimoBalanceData>(cmd)
+        .then((data) => {
+          setBalance(data);
+          setBalanceState("ok");
+        })
+        .catch((error) => {
+          const message = typeof error === "string" ? error : "查询失败";
+          setBalance(null);
+          setBalanceError(message);
+          setBalanceState(message.includes("未配置") ? "nokey" : "error");
+        });
+    },
+    [provider],
+  );
+
+  const loadUsage = React.useCallback(
+    (p?: Provider) => {
+      const active = p ?? provider;
+      setUsageState("loading");
+      if (active === "deepseek") {
+        void fetchCurrentUsage()
+          .then((data) => {
+            setUsage(data);
+            setUsageState("ok");
+            setUsageError("");
+          })
+          .catch((error) => {
+            const message = typeof error === "string" ? error : "查询失败";
+            setUsageError(message);
+            setUsage(null);
+            setUsageState(message.includes("未配置") ? "nokey" : "error");
+          });
+      } else {
+        const now = new Date();
+        void invoke<MimoUsageResult>("fetch_mimo_usage", { month: now.getMonth() + 1, year: now.getFullYear() })
+          .then((data) => {
+            setUsage(data);
+            setUsageState("ok");
+            setUsageError("");
+          })
+          .catch((error) => {
+            const message = typeof error === "string" ? error : "查询失败";
+            setUsageError(message);
+            setUsage(null);
+            setUsageState(message.includes("未配置") ? "nokey" : "error");
+          });
+      }
+    },
+    [provider],
+  );
 
   const refreshAll = React.useCallback(() => {
     loadBalance();
     loadUsage();
   }, [loadBalance, loadUsage]);
 
+  const providerRef = React.useRef(provider);
+  const initialLoadDone = React.useRef(false);
+
   React.useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
+    if (providerRef.current !== provider) {
+      providerRef.current = provider;
+      loadBalance(provider);
+      loadUsage(provider);
+    }
+  }, [provider, loadBalance, loadUsage]);
 
   React.useEffect(() => {
     void invoke<AppConfig>("get_app_config")
       .then((config) => {
-        setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60);
-        setAutoRefreshEnabled(config.autoRefreshEnabled);
+        if (!initialLoadDone.current) {
+          initialLoadDone.current = true;
+          if (config.provider !== providerRef.current) {
+            setBalance(null);
+            setBalanceState("loading");
+            setUsage(null);
+            setUsageState("loading");
+          }
+          providerRef.current = config.provider;
+          setProviderState(config.provider);
+          setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60);
+          setAutoRefreshEnabled(config.autoRefreshEnabled);
+          // Only load after config is known
+          loadBalance(config.provider);
+          loadUsage(config.provider);
+        }
       })
       .catch(() => {
-        setRefreshIntervalSeconds(60);
-        setAutoRefreshEnabled(false);
+        if (!initialLoadDone.current) {
+          initialLoadDone.current = true;
+          setRefreshIntervalSeconds(60);
+          setAutoRefreshEnabled(false);
+          loadBalance();
+          loadUsage();
+        }
       });
-  }, []);
+  }, [loadBalance, loadUsage]);
 
   React.useEffect(() => {
     if (!autoRefreshEnabled) {
@@ -232,6 +345,8 @@ function App() {
     <div className="stage">
       {view === "dashboard" && (
         <DashboardPanel
+          provider={provider}
+          onProviderChange={setProvider}
           balance={balance}
           balanceState={balanceState}
           balanceError={balanceError}
@@ -249,6 +364,8 @@ function App() {
       )}
       {view === "settings" && (
         <SettingsPanel
+          provider={provider}
+          onProviderChange={setProvider}
           onUsageLoaded={(nextUsage) => {
             setUsage(nextUsage);
             setUsageState("ok");
@@ -265,21 +382,34 @@ function App() {
         />
       )}
       {view === "detail" && (
-        <ModelDetailPanel model={model} usage={usage} usageState={usageState} onBack={() => setView("dashboard")} />
+        <ModelDetailPanel model={model} usage={usage} usageState={usageState} provider={provider} onBack={() => setView("dashboard")} />
       )}
     </div>
   );
 }
 
-function BrandIcon({ size = 32 }: { size?: number }) {
+function BrandIcon({ provider, size = 32 }: { provider: Provider; size?: number }) {
+  return null;
+}
+
+function ProviderSelect({
+  provider,
+  onChange,
+}: {
+  provider: Provider;
+  onChange: (p: Provider) => void;
+}) {
   return (
-    <div className="brand-icon" style={{ width: size, height: size }}>
-      <img src="/assets/deepseek-color.png" alt="DeepSeek" />
-    </div>
+    <button className="provider-toggle" onClick={() => onChange(provider === "deepseek" ? "mimo" : "deepseek")}>
+      {provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}
+      <span className="provider-arrow">↺</span>
+    </button>
   );
 }
 
 function DashboardPanel({
+  provider,
+  onProviderChange,
   balance,
   balanceState,
   balanceError,
@@ -291,10 +421,12 @@ function DashboardPanel({
   onSettings,
   onDetail,
 }: {
-  balance: BalanceData | null;
+  provider: Provider;
+  onProviderChange: (p: Provider) => void;
+  balance: BalanceData | MimoBalanceData | null;
   balanceState: BalanceState;
   balanceError: string;
-  usage: UsageResult | null;
+  usage: UsageResult | MimoUsageResult | null;
   usageState: BalanceState;
   usageError: string;
   onRefresh: () => void;
@@ -311,19 +443,32 @@ function DashboardPanel({
     localStorage.setItem("ui-theme", next);
     document.documentElement.setAttribute("data-theme", next);
   };
-  const flash = usage?.models.find((item) => item.key === "flash") ?? null;
-  const pro = usage?.models.find((item) => item.key === "pro") ?? null;
-  const maxTokens = Math.max(flash?.totalTokens ?? 0, pro?.totalTokens ?? 0, 1);
-  const today = usage?.days.find((day) => day.date === todayStr()) ?? null;
-  const todayCost = usageState === "ok" && today ? today.totalCost : null;
+
+  const isDeepSeek = provider === "deepseek";
+  const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
+  const mimoUsage = !isDeepSeek ? (usage as MimoUsageResult | null) : null;
+
+  const flash = dsUsage?.models.find((item) => item.key === "flash") ?? null;
+  const pro = dsUsage?.models.find((item) => item.key === "pro") ?? null;
+  const maxTokens = Math.max(
+    flash?.totalTokens ?? 0,
+    pro?.totalTokens ?? 0,
+    ...(mimoUsage?.models.map((m) => m.totalTokens) ?? []),
+    1,
+  );
+  const today = dsUsage?.days.find((day) => day.date === todayStr()) ?? null;
+  const todayCost = usageState === "ok" && today ? today.totalCost : (mimoUsage ? null : null);
   const monthCost = usageState === "ok" && usage ? usage.monthCost : null;
+
+  const topModels = mimoUsage
+    ? [...mimoUsage.models].sort((a, b) => b.cost - a.cost).slice(0, 4)
+    : [];
 
   return (
     <section className="panel dashboard-panel" data-testid="dashboard-panel">
       <header className="panel-header" data-tauri-drag-region>
         <div className="title-lockup" data-tauri-drag-region>
-          <BrandIcon size={36} />
-          <h1>DeepSeek Monitor</h1>
+          <ProviderSelect provider={provider} onChange={onProviderChange} />
         </div>
         <div className="header-actions">
           <button aria-label="刷新" onClick={onRefresh}>
@@ -354,26 +499,43 @@ function DashboardPanel({
         error={balanceError}
         todayCost={todayCost}
         monthCost={monthCost}
+        provider={provider}
       />
 
       <div className="usage-stack">
-        <UsageRow
-          modelKey="flash"
-          data={flash}
-          maxTokens={maxTokens}
-          state={usageState}
-          onClick={() => onDetail("flash")}
-        />
-        <UsageRow
-          modelKey="pro"
-          data={pro}
-          maxTokens={maxTokens}
-          state={usageState}
-          onClick={() => onDetail("pro")}
-        />
+        {isDeepSeek ? (
+          <>
+            <UsageRow
+              modelKey="flash"
+              data={flash ? { ...flash, key: "flash" } : null}
+              maxTokens={maxTokens}
+              state={usageState}
+              onClick={() => onDetail("flash")}
+            />
+            <UsageRow
+              modelKey="pro"
+              data={pro ? { ...pro, key: "pro" } : null}
+              maxTokens={maxTokens}
+              state={usageState}
+              onClick={() => onDetail("pro")}
+            />
+          </>
+        ) : (
+          topModels.map((m) => (
+            <UsageRow
+              key={m.key}
+              modelKey={modelIcon(m.key)}
+              data={{ ...m, key: modelIcon(m.key) }}
+              maxTokens={maxTokens}
+              state={usageState}
+              onClick={() => onDetail(m.key)}
+              modelDisplay={modelDisplayName(m.key)}
+            />
+          ))
+        )}
       </div>
 
-      <UsageChart usage={usage} state={usageState} error={usageError} />
+      <UsageChart usage={usage} state={usageState} error={usageError} provider={provider} />
     </section>
   );
 }
@@ -384,14 +546,22 @@ function BalanceCard({
   error,
   todayCost,
   monthCost,
+  provider,
 }: {
-  balance: BalanceData | null;
+  balance: BalanceData | MimoBalanceData | null;
   state: BalanceState;
   error: string;
   todayCost: number | null;
   monthCost: number | null;
+  provider: Provider;
 }) {
-  const symbol = balance?.currency === "USD" ? "$" : "¥";
+  const isDeepSeek = provider === "deepseek";
+  const dsBalance = isDeepSeek ? (balance as BalanceData | null) : null;
+  const mimoBalance = !isDeepSeek ? (balance as MimoBalanceData | null) : null;
+
+  const symbol = isDeepSeek
+    ? (dsBalance?.currency === "USD" ? "$" : "¥")
+    : (mimoBalance?.currency === "USD" ? "$" : "¥");
   const amount =
     state === "loading"
       ? "查询中…"
@@ -399,9 +569,11 @@ function BalanceCard({
         ? "未配置"
         : state === "error"
           ? "查询失败"
-          : `${symbol}${balance?.totalBalance ?? "0.00"}`;
-  const statusText = state === "ok" ? (balance?.isAvailable ? "可用" : "余额不足") : "—";
-  const statusOff = state === "ok" && balance != null && !balance.isAvailable;
+          : isDeepSeek
+            ? `${symbol}${dsBalance?.totalBalance ?? "0.00"}`
+            : `${symbol}${mimoBalance?.availableBalance ?? "0.00"}`;
+  const statusText = state === "ok" ? (isDeepSeek && dsBalance?.isAvailable === false ? "余额不足" : "可用") : "—";
+  const statusOff = state === "ok" && isDeepSeek && dsBalance != null && !dsBalance.isAvailable;
 
   return (
     <article className="card balance-card">
@@ -443,15 +615,17 @@ function UsageRow({
   maxTokens,
   state,
   onClick,
+  modelDisplay,
 }: {
   modelKey: ModelName;
   data: UsageModel | null;
   maxTokens: number;
   state: BalanceState;
   onClick: () => void;
+  modelDisplay?: string;
 }) {
   const isFlash = modelKey === "flash";
-  const name = isFlash ? "V4 Flash" : "V4 Pro";
+  const name = modelDisplay ?? (isFlash ? "V4 Flash" : "V4 Pro");
   const tokensText = data
     ? `${fmtInt(data.totalTokens)} Tokens`
     : state === "loading"
@@ -497,21 +671,35 @@ function UsageChart({
   usage,
   state,
   error,
+  provider,
 }: {
-  usage: UsageResult | null;
+  usage: UsageResult | MimoUsageResult | null;
   state: BalanceState;
   error: string;
+  provider: Provider;
 }) {
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
   const MIN_BAR = 3;
-  const days = recentUsageDays(usage?.days ?? []);
-  const points = days.map((day) => {
-    // Flash 与 Pro 合并，不分模型
-    const hit = day.flashCacheHit + day.proCacheHit;
-    const miss = day.flashCacheMiss + day.proCacheMiss;
-    const response = day.flashResponse + day.proResponse;
-    return { date: day.date, hit, miss, response, total: hit + miss + response };
-  });
+
+  const isDeepSeek = provider === "deepseek";
+  const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
+  const mimoUsage = !isDeepSeek ? (usage as MimoUsageResult | null) : null;
+
+  const days = isDeepSeek
+    ? recentUsageDays(dsUsage?.days ?? [])
+    : (mimoUsage?.days ?? []);
+  const points = isDeepSeek
+    ? days.map((day) => {
+        const d = day as UsageDay;
+        const hit = d.flashCacheHit + d.proCacheHit;
+        const miss = d.flashCacheMiss + d.proCacheMiss;
+        const response = d.flashResponse + d.proResponse;
+        return { date: d.date, hit, miss, response, total: hit + miss + response };
+      })
+    : days.map((day) => {
+        const d = day as MimoUsageDay;
+        return { date: d.date, hit: 0, miss: 0, response: d.totalTokens, total: d.totalTokens };
+      });
   const maxVal = Math.max(...points.map((point) => point.total), 1);
   const sumHit = points.reduce((sum, point) => sum + point.hit, 0);
   const sumMiss = points.reduce((sum, point) => sum + point.miss, 0);
@@ -552,18 +740,22 @@ function UsageChart({
                       <span className="bar-tooltip-date">{point.date}</span>
                       <strong>{fmtInt(point.total)} tokens</strong>
                     </div>
-                    <span className="bar-tooltip-row">
-                      <i className="dot hit" />输入（命中缓存）
-                      <strong>{fmtInt(point.hit)} tokens</strong>
-                    </span>
-                    <span className="bar-tooltip-row">
-                      <i className="dot miss" />输入（未命中缓存）
-                      <strong>{fmtInt(point.miss)} tokens</strong>
-                    </span>
-                    <span className="bar-tooltip-row">
-                      <i className="dot response" />输出
-                      <strong>{fmtInt(point.response)} tokens</strong>
-                    </span>
+                    {isDeepSeek && (
+                      <>
+                        <span className="bar-tooltip-row">
+                          <i className="dot hit" />输入（命中缓存）
+                          <strong>{fmtInt(point.hit)} tokens</strong>
+                        </span>
+                        <span className="bar-tooltip-row">
+                          <i className="dot miss" />输入（未命中缓存）
+                          <strong>{fmtInt(point.miss)} tokens</strong>
+                        </span>
+                        <span className="bar-tooltip-row">
+                          <i className="dot response" />输出
+                          <strong>{fmtInt(point.response)} tokens</strong>
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
                 <span className="bar-value">
@@ -580,10 +772,10 @@ function UsageChart({
                   >
                     {point.total > 0 ? (
                       <>
-                        {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
-                        {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
+                        {isDeepSeek && point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
+                        {isDeepSeek && point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
                         {point.response > 0 && (
-                          <i className="seg response" style={{ flexGrow: point.response }} />
+                          <i className={`seg ${isDeepSeek ? "response" : "mimo-tokens"}`} style={{ flexGrow: point.response }} />
                         )}
                       </>
                     ) : (
@@ -596,15 +788,13 @@ function UsageChart({
             ))}
           </div>
           <div className="chart-legend-bottom">
-            <span className="chart-legend-item">
-              <i className="dot hit" />命中
-            </span>
-            <span className="chart-legend-item">
-              <i className="dot miss" />未命中
-            </span>
-            <span className="chart-legend-item">
-              <i className="dot response" />输出
-            </span>
+            {isDeepSeek && (
+              <>
+                <span className="chart-legend-item"><i className="dot hit" />命中</span>
+                <span className="chart-legend-item"><i className="dot miss" />未命中</span>
+              </>
+            )}
+            <span className="chart-legend-item"><i className={`dot ${isDeepSeek ? "response" : "mimo-tokens"}`} />{isDeepSeek ? "输出" : "Tokens"}</span>
           </div>
         </>
       ) : (
@@ -615,14 +805,18 @@ function UsageChart({
 }
 
 function SettingsPanel({
+  provider,
+  onProviderChange,
   onBack,
   onUsageLoaded,
   onUsageCleared,
   onRefreshIntervalChanged,
   onAutoRefreshChanged,
 }: {
+  provider: Provider;
+  onProviderChange: (p: Provider) => void;
   onBack: () => void;
-  onUsageLoaded: (usage: UsageResult) => void;
+  onUsageLoaded: (usage: UsageResult | MimoUsageResult) => void;
   onUsageCleared: () => void;
   onRefreshIntervalChanged: (seconds: number) => void;
   onAutoRefreshChanged: (enabled: boolean) => void;
@@ -804,6 +998,36 @@ function SettingsPanel({
       .finally(() => setBusy(false));
   }, [onUsageCleared]);
 
+  const [mimoStatus, setMimoStatus] = React.useState("");
+  const [mimoSyncing, setMimoSyncing] = React.useState(false);
+
+  React.useEffect(() => {
+    const unlistenStarted = listen("mimo-sync-started", () => {
+      setMimoStatus("请在打开的窗口中登录小米账号，登录后保持窗口打开");
+    });
+    return () => {
+      void unlistenStarted.then((fn) => fn());
+    };
+  }, []);
+
+  const startMimoSync = React.useCallback(() => {
+    setMimoSyncing(true);
+    setMimoStatus("正在打开 MiMo 页面…");
+    void invoke<boolean>("start_mimo_sync")
+      .then((alreadyOpen) => {
+        if (alreadyOpen) {
+          setMimoStatus("登录窗口已打开，请确认已登录小米账号");
+        } else {
+          setMimoStatus("请在打开的窗口中登录小米账号，登录后保持窗口打开");
+        }
+        setMimoSyncing(false);
+      })
+      .catch((error) => {
+        setMimoStatus(typeof error === "string" ? error : "启动同步失败");
+        setMimoSyncing(false);
+      });
+  }, []);
+
   const saveRefreshInterval = React.useCallback(
     (seconds: number) => {
       const previous = refresh;
@@ -860,9 +1084,8 @@ function SettingsPanel({
       </button>
       <div className="settings-inner">
         <header className="settings-header" data-tauri-drag-region>
-          <BrandIcon size={42} />
+          <ProviderSelect provider={provider} onChange={onProviderChange} />
           <div>
-            <h1>DeepSeek Monitor</h1>
             <p>设置</p>
           </div>
         </header>
@@ -897,52 +1120,65 @@ function SettingsPanel({
           </div>
         </SettingsSection>
 
-        <SettingsSection icon={<BarChart3 size={15} />} title="用量同步 Token">
-          <p>用于同步 Token 用量、消费和趋势图。DeepSeek 无官方用量 API，需网页登录 token（与上面的 API Key 不同）。</p>
-          <p className="muted">方式一网页登录自动同步</p>
-          <div className="settings-actions usage-sync-actions">
-            <button className="primary" onClick={startUsageSync} disabled={usageSyncing}>
-              {usageSyncing ? "等待登录" : "网页登录自动同步"}
+        {provider === "deepseek" ? (
+          <SettingsSection icon={<BarChart3 size={15} />} title="用量同步 Token">
+            <p>用于同步 Token 用量、消费和趋势图。DeepSeek 无官方用量 API，需网页登录 token（与上面的 API Key 不同）。</p>
+            <p className="muted">方式一网页登录自动同步</p>
+            <div className="settings-actions usage-sync-actions">
+              <button className="primary" onClick={startUsageSync} disabled={usageSyncing}>
+                {usageSyncing ? "等待登录" : "网页登录自动同步"}
+              </button>
+              <span className={config?.usageTokenConfigured ? "configured" : "configured muted-status"}>
+                <CheckCircle2 size={17} />
+                {config?.usageTokenConfigured ? "已配置" : "未配置"}
+              </span>
+              <button className="secondary" onClick={clearUsageToken} disabled={busy || !config?.usageTokenConfigured}>
+                清除 Token
+              </button>
+            </div>
+            <p className="muted">{usageStatus}</p>
+            <button
+              className="link-button"
+              onClick={() => setShowManualPaste((value) => !value)}
+            >
+              {showManualPaste ? "收起手动粘贴" : "方式二：手动粘贴 token"}
             </button>
-            <span className={config?.usageTokenConfigured ? "configured" : "configured muted-status"}>
-              <CheckCircle2 size={17} />
-              {config?.usageTokenConfigured ? "已配置" : "未配置"}
-            </span>
-            <button className="secondary" onClick={clearUsageToken} disabled={busy || !config?.usageTokenConfigured}>
-              清除 Token
-            </button>
-          </div>
-          <p className="muted">{usageStatus}</p>
-          <button
-            className="link-button"
-            onClick={() => setShowManualPaste((value) => !value)}
-          >
-            {showManualPaste ? "收起手动粘贴" : "方式二：手动粘贴 token"}
-          </button>
-          {showManualPaste && (
-            <>
-              <p className="muted">
-                获取：浏览器登录 platform.deepseek.com，按 F12 打开控制台，输入
-                JSON.parse(localStorage.userToken).value 回车，复制返回的字符串。
-              </p>
-              <p className="muted">token 会过期，用量查询失败时重新获取一次即可。</p>
-              <div className="key-row">
-                <input
-                  aria-label="用量 Token"
-                  type="password"
-                  value={usageToken}
-                  placeholder={config?.usageTokenConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : ""}
-                  onChange={(event) => setUsageToken(event.target.value)}
-                />
-              </div>
-              <div className="settings-actions">
-                <button className="primary" onClick={saveUsageToken} disabled={busy || !usageToken.trim()}>
-                  保存 Token
-                </button>
-              </div>
-            </>
-          )}
-        </SettingsSection>
+            {showManualPaste && (
+              <>
+                <p className="muted">
+                  获取：浏览器登录 platform.deepseek.com，按 F12 打开控制台，输入
+                  JSON.parse(localStorage.userToken).value 回车，复制返回的字符串。
+                </p>
+                <p className="muted">token 会过期，用量查询失败时重新获取一次即可。</p>
+                <div className="key-row">
+                  <input
+                    aria-label="用量 Token"
+                    type="password"
+                    value={usageToken}
+                    placeholder={config?.usageTokenConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : ""}
+                    onChange={(event) => setUsageToken(event.target.value)}
+                  />
+                </div>
+                <div className="settings-actions">
+                  <button className="primary" onClick={saveUsageToken} disabled={busy || !usageToken.trim()}>
+                    保存 Token
+                  </button>
+                </div>
+              </>
+            )}
+          </SettingsSection>
+        ) : (
+          <SettingsSection icon={<BarChart3 size={15} />} title="MiMo 用量同步">
+            <p>登录 MiMo 平台后，通过网页代理获取 Token 用量和消费数据。无需手动提取 Cookie。</p>
+            <p className="muted">网页登录（需保持窗口打开）</p>
+            <div className="settings-actions usage-sync-actions">
+              <button className="primary" onClick={startMimoSync} disabled={mimoSyncing}>
+                {mimoSyncing ? "打开中…" : "打开 MiMo 登录页"}
+              </button>
+            </div>
+            <p className="muted">{mimoStatus || "点击上方按钮打开 MiMo 平台，登录后保持窗口打开即可使用"}</p>
+          </SettingsSection>
+        )}
 
         <SettingsSection icon={<Power size={15} />} title="开机自启">
           <p>开启后，每次登录 Windows 时自动启动 DeepSeek Monitor。</p>
@@ -1022,29 +1258,61 @@ function ModelDetailPanel({
   usage,
   usageState,
   onBack,
+  provider,
 }: {
   model: ModelName;
-  usage: UsageResult | null;
+  usage: UsageResult | MimoUsageResult | null;
   usageState: BalanceState;
   onBack: () => void;
+  provider: Provider;
 }) {
+  const isDeepSeek = provider === "deepseek";
   const isFlash = model === "flash";
-  const data = usage?.models.find((item) => item.key === model) ?? null;
-  const title = isFlash ? "V4 Flash" : "V4 Pro";
-  const tintClass = isFlash ? "flash" : "pro";
-  const cost = data ? fmtMoney(data.cost) : "—";
-  const totalText = data ? fmtTokensShort(data.totalTokens) : "—";
+  const mimoUsage = !isDeepSeek ? (usage as MimoUsageResult | null) : null;
+  const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
 
-  const days = recentUsageDays(usage?.days ?? []);
-  const points = days.map((day) => {
-    const hit = isFlash ? day.flashCacheHit : day.proCacheHit;
-    const miss = isFlash ? day.flashCacheMiss : day.proCacheMiss;
-    const response = isFlash ? day.flashResponse : day.proResponse;
-    return { date: day.date, hit, miss, response, total: hit + miss + response };
-  });
+  let title: string;
+  let tintClass: string;
+  let cost: string;
+  let totalText: string;
+
+  if (isDeepSeek) {
+    const data = dsUsage?.models.find((item) => item.key === model) ?? null;
+    title = isFlash ? "V4 Flash" : "V4 Pro";
+    tintClass = isFlash ? "flash" : "pro";
+    cost = data ? fmtMoney(data.cost) : "—";
+    totalText = data ? fmtTokensShort(data.totalTokens) : "—";
+  } else {
+    title = modelDisplayName(model);
+    tintClass = modelIcon(model);
+    const modelData = mimoUsage?.models.find((m) => m.key === model);
+    cost = modelData ? fmtMoney(modelData.cost) : "—";
+    totalText = modelData ? fmtTokensShort(modelData.totalTokens) : "—";
+  }
+
+  const days = isDeepSeek
+    ? recentUsageDays(dsUsage?.days ?? [])
+    : (mimoUsage?.days ?? []);
+  const points = isDeepSeek
+    ? days.map((day) => {
+        const d = day as UsageDay;
+        const hit = isFlash ? d.flashCacheHit : d.proCacheHit;
+        const miss = isFlash ? d.flashCacheMiss : d.proCacheMiss;
+        const response = isFlash ? d.flashResponse : d.proResponse;
+        return { date: d.date, hit, miss, response, total: hit + miss + response };
+      })
+    : days.map((day) => {
+        const d = day as MimoUsageDay;
+        const key = model;
+        const modelDay = d.models.find((m) => m.key === key);
+        const tokens = modelDay?.totalTokens ?? 0;
+        return { date: d.date, hit: 0, miss: 0, response: tokens, total: tokens };
+      });
   const maxVal = Math.max(...points.map((point) => point.total), 1);
   const rangeText =
     points.length > 0 ? `${mmdd(points[0].date)} - ${mmdd(points[points.length - 1].date)}` : "";
+
+  const detailModelData = isDeepSeek ? (dsUsage?.models.find((item) => item.key === model) ?? null) : (mimoUsage?.models.find((m) => m.key === model) ?? null);
 
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
   const MIN_BAR = 3; // 整根柱子的最小可见高度百分比（含空数据占位）
@@ -1056,7 +1324,7 @@ function ModelDetailPanel({
       </button>
       <article className="card detail-hero" data-tauri-drag-region>
         <div className={`model-badge large ${tintClass}`}>
-          {isFlash ? <Zap size={34} fill="currentColor" /> : <Brain size={33} />}
+          {isDeepSeek ? (isFlash ? <Zap size={34} fill="currentColor" /> : <Brain size={33} />) : <Zap size={34} fill="currentColor" />}
         </div>
         <div>
           <h1>{title}</h1>
@@ -1067,7 +1335,7 @@ function ModelDetailPanel({
       <div className="detail-metrics">
         <article className="card metric-card">
           <span>API 请求次数</span>
-          <strong className={tintClass}>{data ? fmtInt(data.requestCount) : "—"}</strong>
+          <strong className={tintClass}>{detailModelData ? fmtInt(detailModelData.requestCount) : "—"}</strong>
         </article>
         <article className="card metric-card">
           <span>Tokens</span>
@@ -1097,16 +1365,20 @@ function ModelDetailPanel({
                         <span className="bar-tooltip-date">{point.date}</span>
                         <strong>{fmtInt(point.total)} tokens</strong>
                       </div>
+                      {isDeepSeek && (
+                        <>
+                          <span className="bar-tooltip-row">
+                            <i className="dot hit" />输入（命中缓存）
+                            <strong>{fmtInt(point.hit)} tokens</strong>
+                          </span>
+                          <span className="bar-tooltip-row">
+                            <i className="dot miss" />输入（未命中缓存）
+                            <strong>{fmtInt(point.miss)} tokens</strong>
+                          </span>
+                        </>
+                      )}
                       <span className="bar-tooltip-row">
-                        <i className="dot hit" />输入（命中缓存）
-                        <strong>{fmtInt(point.hit)} tokens</strong>
-                      </span>
-                      <span className="bar-tooltip-row">
-                        <i className="dot miss" />输入（未命中缓存）
-                        <strong>{fmtInt(point.miss)} tokens</strong>
-                      </span>
-                      <span className="bar-tooltip-row">
-                        <i className="dot response" />输出
+                        <i className={`dot ${isDeepSeek ? "response" : "mimo-tokens"}`} />{isDeepSeek ? "输出" : "Tokens"}
                         <strong>{fmtInt(point.response)} tokens</strong>
                       </span>
                     </div>
@@ -1124,9 +1396,9 @@ function ModelDetailPanel({
                     >
                       {point.total > 0 ? (
                         <>
-                          {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
-                          {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
-                          {point.response > 0 && <i className="seg response" style={{ flexGrow: point.response }} />}
+                          {isDeepSeek && point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
+                          {isDeepSeek && point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
+                          {point.response > 0 && <i className={`seg ${isDeepSeek ? "response" : "mimo-tokens"}`} style={{ flexGrow: point.response }} />}
                         </>
                       ) : (
                         <i className="seg empty" />
@@ -1138,9 +1410,13 @@ function ModelDetailPanel({
               ))}
             </div>
             <div className="chart-legend-bottom">
-              <span className="chart-legend-item"><i className="dot hit" />命中</span>
-              <span className="chart-legend-item"><i className="dot miss" />未命中</span>
-              <span className="chart-legend-item"><i className="dot response" />输出</span>
+              {isDeepSeek && (
+                <>
+                  <span className="chart-legend-item"><i className="dot hit" />命中</span>
+                  <span className="chart-legend-item"><i className="dot miss" />未命中</span>
+                </>
+              )}
+              <span className="chart-legend-item"><i className={`dot ${isDeepSeek ? "response" : "mimo-tokens"}`} />{isDeepSeek ? "输出" : "Tokens"}</span>
             </div>
           </>
         ) : (
