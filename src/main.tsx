@@ -460,9 +460,16 @@ function DashboardPanel({
   const todayCost = usageState === "ok" && today ? today.totalCost : (mimoUsage ? null : null);
   const monthCost = usageState === "ok" && usage ? usage.monthCost : null;
 
+  const mimoDefaultModels: MimoUsageModel[] = [
+    { key: "mimo-v2.5", name: "MiMo-V2.5", totalTokens: 0, requestCount: 0, cacheHitTokens: 0, cacheMissTokens: 0, responseTokens: 0, cost: 0 },
+    { key: "mimo-v2.5-pro", name: "MiMo-V2.5-Pro", totalTokens: 0, requestCount: 0, cacheHitTokens: 0, cacheMissTokens: 0, responseTokens: 0, cost: 0 },
+  ];
   const topModels = mimoUsage
-    ? [...mimoUsage.models].sort((a, b) => b.cost - a.cost).slice(0, 4)
-    : [];
+    ? mimoDefaultModels.map((def) => {
+        const actual = mimoUsage.models.find((m) => m.key === def.key);
+        return actual ?? def;
+      })
+    : mimoDefaultModels;
 
   return (
     <section className="panel dashboard-panel" data-testid="dashboard-panel">

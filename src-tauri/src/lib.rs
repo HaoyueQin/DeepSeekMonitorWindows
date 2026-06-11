@@ -32,6 +32,8 @@ pub fn run() {
         provider: String, // "deepseek" | "mimo"
         #[serde(default)]
         mimo_token: Option<String>,
+        #[serde(default)]
+        mimo_ph: Option<String>,
         refresh_interval_seconds: u64,
         #[serde(default)]
         auto_refresh_enabled: bool,
@@ -1118,6 +1120,16 @@ pub fn run() {
                             .to_string(),
                     );
                 }
+                // 检查 401 并自动跳转登录页
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if val.get("code").and_then(|v| v.as_i64()) == Some(401) {
+                        if let Some(login_url) = val.get("loginUrl").and_then(|v| v.as_str()) {
+                            let js = format!("window.location.href='{}'", login_url.replace('\'', "\\'"));
+                            let _ = window.eval(&js);
+                        }
+                        return Err("MiMo 未登录，请在弹出的窗口中完成登录后重试".to_string());
+                    }
+                }
                 Ok(data)
             }
             Ok(Err(_)) => Err("数据接收通道关闭".to_string()),
@@ -1136,6 +1148,7 @@ pub fn run() {
         #[derive(Deserialize)]
         struct ApiEnvelope<T2> {
             code: i32,
+            #[serde(default)]
             #[allow(dead_code)]
             message: String,
             data: Option<T2>,
@@ -1218,12 +1231,21 @@ pub fn run() {
         cost: f64,
     }
 
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MimoUsageDayModel {
+        key: String,
+        total_tokens: u64,
+        total_cost: f64,
+    }
+
     #[derive(Debug, Serialize)]
     #[serde(rename_all = "camelCase")]
     struct MimoUsageDay {
         date: String,
         total_tokens: u64,
         total_cost: f64,
+        models: Vec<MimoUsageDayModel>,
     }
 
     #[derive(Debug, Serialize)]
@@ -1235,8 +1257,9 @@ pub fn run() {
     }
     #[tauri::command]
     async fn fetch_mimo_usage(app: tauri::AppHandle, _month: u32, _year: u32) -> Result<MimoUsageResult, String> {
-        // 从 /api/v1/balance 返回的概览中取 token 用量作为模型数据
-        let overview_json = fetch_mimo_api(&app, "/api/v1/balance", 15).await?;
+        // 先获取总用量概览
+        let overview_json = fetch_mimo_api(&app, "/api/v1/usage", 15).await?;
+
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct TokenUsageData {
@@ -1246,14 +1269,12 @@ pub fn run() {
             output_token: u64,
             #[serde(default)]
             cache_token: u64,
-            #[allow(dead_code)]
             #[serde(default)]
             total_token: u64,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct CostUsageData {
-            #[allow(dead_code)]
             #[serde(default)]
             total_cost: String,
             #[serde(default)]
@@ -1261,39 +1282,274 @@ pub fn run() {
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct AccountOverview {
+        struct UsageOverview {
             #[serde(default)]
             token_usage: Option<TokenUsageData>,
             #[serde(default)]
             cost_usage: Option<CostUsageData>,
         }
-        if let Ok(overview) = parse_mimo_api_response::<AccountOverview>(&overview_json) {
-            let month_cost = overview.cost_usage.as_ref()
-                .and_then(|c| c.current_month_cost.parse::<f64>().ok())
-                .unwrap_or(0.0);
-            let mut models = Vec::new();
-            if let Some(tokens) = &overview.token_usage {
-                if tokens.input_token > 0 {
-                    models.push(MimoUsageModel {
-                        key: "input".to_string(), name: "输入 Tokens".to_string(),
-                        total_tokens: tokens.input_token, request_count: 0,
-                        cache_hit_tokens: tokens.cache_token, cache_miss_tokens: tokens.input_token.saturating_sub(tokens.cache_token),
-                        response_tokens: tokens.output_token, cost: 0.0,
-                    });
-                }
-                if tokens.output_token > 0 {
-                    models.push(MimoUsageModel {
-                        key: "output".to_string(), name: "输出 Tokens".to_string(),
-                        total_tokens: tokens.output_token, request_count: 0,
+
+        let overview = parse_mimo_api_response::<UsageOverview>(&overview_json)?;
+        let month_cost = overview.cost_usage.as_ref()
+            .and_then(|c| c.current_month_cost.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        // 尝试获取详细用量（按模型+日期分解）
+        match fetch_mimo_usage_detail(&app).await {
+            Ok(items) if !items.is_empty() => {
+                let mut models_map: std::collections::HashMap<String, MimoUsageModel> = std::collections::HashMap::new();
+                let mut days_map: std::collections::HashMap<String, (MimoUsageDay, std::collections::HashMap<String, MimoUsageDayModel>)> = std::collections::HashMap::new();
+                let mut detail_month_cost: f64 = 0.0;
+
+                for item in &items {
+                    let model_entry = models_map.entry(item.model.clone()).or_insert_with(|| MimoUsageModel {
+                        key: item.model.clone(),
+                        name: item.model.clone(),
+                        total_tokens: 0, request_count: 0,
                         cache_hit_tokens: 0, cache_miss_tokens: 0,
-                        response_tokens: tokens.output_token, cost: 0.0,
+                        response_tokens: 0, cost: 0.0,
                     });
+                    model_entry.total_tokens += item.total_token;
+                    model_entry.request_count += item.request_count;
+                    model_entry.cache_hit_tokens += item.input_hit_token;
+                    model_entry.cache_miss_tokens += item.input_miss_token;
+                    model_entry.response_tokens += item.output_token;
+                    model_entry.cost += item.consumed_amount.parse::<f64>().unwrap_or(0.0);
+
+                    let (day_entry, day_models) = days_map.entry(item.date.clone()).or_insert_with(|| {
+                        (MimoUsageDay { date: item.date.clone(), total_tokens: 0, total_cost: 0.0, models: vec![] },
+                         std::collections::HashMap::new())
+                    });
+                    day_entry.total_tokens += item.total_token;
+                    day_entry.total_cost += item.consumed_amount.parse::<f64>().unwrap_or(0.0);
+                    let day_model = day_models.entry(item.model.clone()).or_insert_with(|| MimoUsageDayModel {
+                        key: item.model.clone(), total_tokens: 0, total_cost: 0.0,
+                    });
+                    day_model.total_tokens += item.total_token;
+                    day_model.total_cost += item.consumed_amount.parse::<f64>().unwrap_or(0.0);
+                    detail_month_cost += item.consumed_amount.parse::<f64>().unwrap_or(0.0);
+                }
+
+                let mut days: Vec<MimoUsageDay> = Vec::new();
+                for (_, (mut day, models_map)) in days_map {
+                    day.models = models_map.into_values().collect();
+                    days.push(day);
+                }
+                days.sort_by(|a, b| a.date.cmp(&b.date));
+                let models: Vec<MimoUsageModel> = models_map.into_values().collect();
+                Ok(MimoUsageResult { models, days, month_cost: if detail_month_cost > 0.0 { detail_month_cost } else { month_cost } })
+            }
+            _ => {
+                // fallback：总用量概览
+                let mut models = Vec::new();
+                if let Some(tokens) = &overview.token_usage {
+                    if tokens.input_token > 0 {
+                        models.push(MimoUsageModel {
+                            key: "mimo-v2.5-pro".to_string(), name: "MiMo-V2.5-Pro".to_string(),
+                            total_tokens: tokens.input_token + tokens.output_token, request_count: 0,
+                            cache_hit_tokens: tokens.cache_token, cache_miss_tokens: tokens.input_token.saturating_sub(tokens.cache_token),
+                            response_tokens: tokens.output_token, cost: 0.0,
+                        });
+                    }
+                }
+                Ok(MimoUsageResult { models, days: vec![], month_cost })
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct UsageDetailItem {
+        #[serde(default)]
+        date: String,
+        #[serde(default)]
+        model: String,
+        #[serde(default)]
+        total_token: u64,
+        #[serde(default)]
+        input_hit_token: u64,
+        #[serde(default)]
+        input_miss_token: u64,
+        #[serde(default)]
+        output_token: u64,
+        #[serde(default)]
+        request_count: u64,
+        #[serde(default)]
+        consumed_amount: String,
+    }
+
+    async fn fetch_mimo_usage_detail(app: &tauri::AppHandle) -> Result<Vec<UsageDetailItem>, String> {
+        // 1. 先用缓存的 ph 尝试直接调用 API（快速路径）
+        {
+            let config = read_stored_config()?;
+            if let Some(ref ph) = config.mimo_ph {
+                let api_url = format!("/api/v1/usage/detail/list?api-platform_ph={}", ph);
+                if let Ok(json) = fetch_mimo_api(app, &api_url, 10).await {
+                    if let Ok(items) = parse_detail_items(&json) {
+                        if !items.is_empty() {
+                            return Ok(items);
+                        }
+                    }
                 }
             }
-            return Ok(MimoUsageResult { models, days: vec![], month_cost });
         }
 
-        Err("无法解析 MiMo 用量数据".to_string())
+        // 2. 缓存的 ph 失效或不存在，从页面提取
+        use tiny_http::{Header, Method, Response, Server};
+
+        let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
+        let _lock = lock_guard.lock().await;
+
+        let window = ensure_mimo_webview_sync(app)?;
+
+        // 导航到用量页面
+        let usage_url: tauri::Url = "https://platform.xiaomimimo.com/console/usage"
+            .parse()
+            .map_err(|_| "无效 URL".to_string())?;
+        let _ = window.navigate(usage_url);
+
+        // 轮询提取 ph（最多 8 秒，每 1 秒检查一次）
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(8) {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+            // 重新注入拦截器
+            let _ = window.eval(r#"
+                if (!window.__mimo_hooked) {
+                    window.__mimo_ph = null;
+                    window.__mimo_detail = null;
+                    const __of = window.fetch;
+                    window.fetch = function() {
+                        const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
+                        if (u.includes('api-platform_ph=')) {
+                            const m = u.match(/api-platform_ph=([^&]+)/);
+                            if (m) { window.__mimo_ph = decodeURIComponent(m[1]); try { localStorage.setItem('mimo_platform_ph', window.__mimo_ph); } catch(e) {} }
+                            if (u.includes('/usage/detail/list')) {
+                                return __of.apply(this, arguments).then(async r => { try { window.__mimo_detail = await r.clone().text(); } catch(e) {} return r; });
+                            }
+                        }
+                        return __of.apply(this, arguments);
+                    };
+                    const __oo = XMLHttpRequest.prototype.open;
+                    const __os = XMLHttpRequest.prototype.send;
+                    XMLHttpRequest.prototype.open = function(m, u) { this.__mu = u; return __oo.apply(this, arguments); };
+                    XMLHttpRequest.prototype.send = function() {
+                        const u = this.__mu || '';
+                        if (u.includes('api-platform_ph=')) {
+                            const m = u.match(/api-platform_ph=([^&]+)/);
+                            if (m) { window.__mimo_ph = decodeURIComponent(m[1]); try { localStorage.setItem('mimo_platform_ph', window.__mimo_ph); } catch(e) {} }
+                            if (u.includes('/usage/detail/list')) this.addEventListener('load', function() { window.__mimo_detail = this.responseText; });
+                        }
+                        return __os.apply(this, arguments);
+                    };
+                    window.__mimo_hooked = true;
+                }
+            "#);
+
+            // 检查是否捕获到数据
+            let req_id = format!("__mp_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+            let (tx, rx) = oneshot::channel();
+            {
+                let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                let mut map = state.lock().unwrap();
+                map.insert(req_id.clone(), tx);
+            }
+
+            let port = Arc::new(AtomicU16::new(0));
+            let port_clone = Arc::clone(&port);
+            let shared_map = {
+                let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                Arc::clone(&state)
+            };
+            let _server = std::thread::spawn(move || {
+                let server = match Server::http("127.0.0.1:0") { Ok(s) => s, Err(_) => return };
+                if let Some(addr) = server.server_addr().to_ip() { port_clone.store(addr.port(), Ordering::SeqCst); } else { return; }
+                if let Ok(Some(mut req)) = server.recv_timeout(std::time::Duration::from_secs(3)) {
+                    if *req.method() != Method::Options {
+                        let mut body = String::new();
+                        let _ = req.as_reader().read_to_string(&mut body);
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
+                            if let (Some(rid), Some(data)) = (parsed.get("reqId").and_then(|v| v.as_str()), parsed.get("data").and_then(|v| v.as_str())) {
+                                let mut map = shared_map.lock().unwrap();
+                                if let Some(tx) = map.remove(rid) { let _ = tx.send(data.to_string()); }
+                            }
+                        }
+                        let resp = Response::from_string("OK").with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                        let _ = req.respond(resp);
+                    }
+                }
+            });
+
+            let start2 = std::time::Instant::now();
+            let actual_port = loop {
+                let p = port.load(Ordering::SeqCst);
+                if p != 0 { break p; }
+                if start2.elapsed() > std::time::Duration::from_secs(3) { break 0; }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            };
+            if actual_port == 0 { continue; }
+
+            let check_js = format!(
+                r#"try{{(async()=>{{
+                    var ph=window.__mimo_ph||localStorage.getItem('mimo_platform_ph')||null;
+                    var d=window.__mimo_detail;
+                    if(!ph&&!d&&document.documentElement){{
+                        var h=document.documentElement.innerHTML||'';
+                        var m=h.match(/api-platform_ph[=:]([^'"&\s]+)/);
+                        if(m)ph=decodeURIComponent(m[1]);
+                    }}
+                    if(d){{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:d}})}});}}
+                    else if(ph){{var u='https://platform.xiaomimimo.com/api/v1/usage/detail/list?api-platform_ph='+encodeURIComponent(ph);var r=await fetch(u,{{method:'GET',credentials:'include',headers:{{'Accept':'application/json'}}}});var t=await r.text();window.__mimo_detail=t;try{{localStorage.setItem('mimo_platform_ph',ph);}}catch(e){{}}fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:t}})}});}}
+                    else{{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:''}})}});}}
+                }})()}}catch(e){{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:''}})}});}}"#,
+                port = actual_port, req_id = req_id,
+            );
+            let _ = window.eval(&check_js);
+
+            if let Ok(Ok(data)) = tokio::time::timeout(std::time::Duration::from_secs(4), rx).await {
+                if !data.is_empty() && !data.starts_with('<') {
+                    // 检查是否有效数据
+                    if let Ok(items) = parse_detail_items(&data) {
+                        if !items.is_empty() {
+                    // 缓存 ph
+                    if let Ok(config) = read_stored_config() {
+                        let _ = write_stored_config(&config);
+                    }
+                            // 尝试从 localStorage 缓存 ph
+                            let _ = window.eval(&format!(
+                                r#"try{{var ph=window.__mimo_ph||localStorage.getItem('mimo_platform_ph');if(ph)fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}_ph',data:ph}})}});}}catch(e){{}}"#,
+                                port = actual_port, req_id = req_id,
+                            ));
+                            // 等待 ph 回传
+                            let (tx2, rx2) = oneshot::channel();
+                            {
+                                let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                                let mut map = state.lock().unwrap();
+                                map.insert(format!("{}_ph", req_id), tx2);
+                            }
+                            if let Ok(Ok(ph)) = tokio::time::timeout(std::time::Duration::from_secs(2), rx2).await {
+                                if !ph.is_empty() {
+                                    if let Ok(mut config) = read_stored_config() {
+                                        config.mimo_ph = Some(ph);
+                                        let _ = write_stored_config(&config);
+                                    }
+                                }
+                            }
+                            return Ok(items);
+                        }
+                    }
+                }
+            }
+        }
+
+        Err("无法获取用量详情，请确认已登录 MiMo".to_string())
+    }
+
+    fn parse_detail_items(json: &str) -> Result<Vec<UsageDetailItem>, String> {
+        #[derive(Deserialize)]
+        struct R { #[serde(default)] code: i32, #[serde(default)] data: Option<Vec<UsageDetailItem>> }
+        let r: R = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        if r.code != 0 { return Err(format!("code={}", r.code)); }
+        Ok(r.data.unwrap_or_default())
     }
 
     // 通过保持 webview 窗口打开，从 SPA 页面的 DOM 提取数据（因为 HttpOnly Cookie 无法从 JS 读取）。

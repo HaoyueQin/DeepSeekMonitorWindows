@@ -19,7 +19,7 @@ DeepSeek / MiMo Monitor Windows: Windows desktop adaptation of felikschu/deepsee
 - 支持 Windows 托盘入口，主窗口默认不进入任务栏。
 - 支持 API Key 保存、清除和余额验证。
 - 支持用量 Token 自动同步和手动粘贴兜底。
-- **支持 MiMo 平台（开发中）**：可通过顶部切换至 MiMo 平台，查看账户余额和概览。**用量明细和模型各 Token 统计尚未完成开发。**
+- **支持 MiMo 平台（Beta）**：可通过顶部切换至 MiMo 平台，查看账户余额。用量明细（按模型和日期分解）后端已实现，但 `api-platform_ph` 自动提取尚不稳定，暂未完全打通。
 - 液态玻璃质感 UI：基于 `backdrop-filter: blur()` 实现动态高斯模糊，叠加半透明渐变层模拟 Vibrance 效果，边缘内高光+半透明描边模拟玻璃厚度与折射，支持深色/浅色主题。
 - UI 复用原 macOS 版本的视觉方向，并按 Windows Tauri 窗口做适配。
 
@@ -89,7 +89,7 @@ Tauri 打包目标当前配置为 NSIS 安装包，产物位于 `src-tauri/targe
 
 主面板顶部可切换至 MiMo 平台。切换后会自动弹出 MiMo 网页登录窗口，登录成功后即可查看账户余额。
 
-**当前状态**：余额查询可用；用量明细（模型 Token 统计）仍在开发中，暂时显示 "—"。
+**当前状态**：余额查询可用；用量明细（模型 Token 统计）后端已实现，但 `api-platform_ph` 自动提取尚不稳定，暂未完全打通。首次使用如遇 401 错误，会自动跳转至小米账号登录页面。
 
 ## 数据存储
 
@@ -174,15 +174,19 @@ Rust 后端依赖：
 
 ### v1.2.0
 
-> **开发中版本，MiMo 用量明细尚未完成。**
+> **开发中版本，MiMo 用量明细功能尚未完成。**
 
 - **MiMo 平台支持（Beta）**：新增 MiMo 平台切换能力，通过顶部按钮在 DeepSeek 与 MiMo 之间切换。
 - **MiMo 余额查询**：通过 WebView2 内嵌 HTTP 服务器 + JavaScript Fetch 方式获取 MiMo API 数据，支持 HttpOnly Cookie 登录态透传。
-- **MiMo 模型展示**：模型行改为动态渲染，按消费金额排序取 Top 4，支持 MiMo 模型名自动映射图标（`mimo-v2.5` → flash 图标，`mimo-v2.5-pro` → pro 图标）。
+- **MiMo 用量明细（开发中）**：后端已实现 `/api/v1/usage/detail/list` 接口调用，支持按模型（V2.5 / V2.5 Pro）和日期分解的用量数据。自动提取 `api-platform_ph` 参数的逻辑尚不稳定，首次使用需手动触发页面加载。
+- **MiMo 模型展示**：主面板始终显示 V2.5 和 V2.5 Pro 两行模型占位，无论是否有数据。
+- **MiMo 每日趋势图**：后端已实现按日期聚合的用量数据，前端趋势图已对接，待 `api-platform_ph` 提取打通后可正常显示。
+- **MiMo 401 自动跳转登录**：检测到 MiMo API 返回 401 时，自动跳转小米账号登录页面。
+- **MiMo 配置缓存**：`api-platform_ph` 参数缓存至本地配置文件，避免重复提取。
 - **Provider 持久化**：当前选择的平台（DeepSeek/MiMo）存入配置文件，重启自动恢复。
 - **串行化 WebView 访问**：解决并发导航竞争导致的接口请求失败。
 - **Rust 依赖新增**：`tiny_http` 0.12 用于本地 HTTP 回调；`tokio::sync::Mutex` 用于 WebView 访问串行化。
-- **已知限制**：MiMo 用量明细（模型 Token 统计）依赖 `api-platform_ph` 动态参数，暂未打通，查无数据时不显示。
+- **已知问题**：`api-platform_ph` 动态参数的自动提取逻辑不稳定，可能导致用量明细无法显示；401 登录跳转在某些场景下不生效。
 - **液态玻璃 UI 增强**：Provider 切换按钮适配两种平台名称显示。
 
 ### v1.1.1
