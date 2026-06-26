@@ -105,7 +105,28 @@ fn resize_window(window: WebviewWindow, width: f64, height: f64) -> Result<(), S
     let new_size = window.outer_size().map_err(|e| e.to_string())?;
     let new_x = (old_right - new_size.width as i32).max(0);
     let new_y = (old_bottom - new_size.height as i32).max(0);
-    window.set_position(PhysicalPosition::new(new_x, new_y)).map_err(|e| e.to_string())
+    window.set_position(PhysicalPosition::new(new_x, new_y)).map_err(|e| e.to_string())?;
+
+    // 保存窗口状态
+    let _ = save_window_state(&window);
+    Ok(())
+}
+
+/// 保存窗口大小和位置到配置
+fn save_window_state(window: &WebviewWindow) -> Result<(), String> {
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let scale = window.current_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    // 转为逻辑像素保存
+    let logical_w = size.width as f64 / scale;
+    let logical_h = size.height as f64 / scale;
+
+    let mut config = config::read_stored_config()?;
+    config.window_width = Some(logical_w);
+    config.window_height = Some(logical_h);
+    config.window_x = Some(pos.x);
+    config.window_y = Some(pos.y);
+    config::write_stored_config(&config)
 }
 
 #[tauri::command]
@@ -237,6 +258,30 @@ fn mimo_api_response(
     mimo::do_mimo_api_response(&app, req_id, json)
 }
 
+// ─── 自动更新 ──────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct UpdateInfo {
+    version: String,
+    date: String,
+    body: String,
+}
+
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| format!("获取更新器失败：{e}"))?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(UpdateInfo {
+            version: update.version.clone(),
+            date: update.date.map(|d| d.to_string()).unwrap_or_default(),
+            body: update.body.clone().unwrap_or_default(),
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("检查更新失败：{e}")),
+    }
+}
+
 // ─── 主入口 ──────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -272,8 +317,10 @@ pub fn run() {
             fetch_mimo_usage,
             start_mimo_sync,
             ensure_mimo_webview,
-            mimo_api_response
+            mimo_api_response,
+            check_update
         ])
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -296,8 +343,17 @@ pub fn run() {
             // 初始化托盘
             tray::setup_tray(app)?;
 
-            // 首次启动时将窗口定位到屏幕右下角
+            // 恢复窗口大小和位置，或首次启动定位到右下角
             if let Some(window) = app.get_webview_window("main") {
+                if let Ok(config) = config::read_stored_config() {
+                    if let (Some(w), Some(h), Some(x), Some(y)) = (config.window_width, config.window_height, config.window_x, config.window_y) {
+                        // 有保存的状态，恢复
+                        let _ = window.set_size(tauri::LogicalSize::new(w, h));
+                        let _ = window.set_position(tauri::PhysicalPosition::new(x.max(0), y.max(0)));
+                        return Ok(());
+                    }
+                }
+                // 首次启动或无保存状态，定位到右下角
                 let _ = tray::position_near_tray(&window);
             }
 

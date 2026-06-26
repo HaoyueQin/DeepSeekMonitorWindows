@@ -159,6 +159,116 @@ fn normalize_refresh_interval_seconds(value: u64) -> u64 {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_valid() {
+        assert_eq!(normalize_refresh_interval_seconds(60), 60);
+        assert_eq!(normalize_refresh_interval_seconds(300), 300);
+        assert_eq!(normalize_refresh_interval_seconds(1800), 1800);
+        assert_eq!(normalize_refresh_interval_seconds(3600), 3600);
+    }
+
+    #[test]
+    fn normalize_invalid() {
+        assert_eq!(normalize_refresh_interval_seconds(0), 60);
+        assert_eq!(normalize_refresh_interval_seconds(1), 60);
+        assert_eq!(normalize_refresh_interval_seconds(999), 60);
+        assert_eq!(normalize_refresh_interval_seconds(7200), 60);
+    }
+
+    #[test]
+    fn api_key_preview_long() {
+        let preview = api_key_preview("sk-abcde12345fghij67890");
+        assert!(preview.contains("..."));
+        assert!(preview.starts_with("sk-abc"));
+        assert!(preview.ends_with("7890"));
+    }
+
+    #[test]
+    fn api_key_preview_short() {
+        assert_eq!(api_key_preview("short"), "已保存");
+    }
+
+    #[test]
+    fn decrypt_passthrough_plain() {
+        let result = decrypt_credential("plain-text-token");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "plain-text-token");
+    }
+
+    #[test]
+    fn decrypt_invalid_hex() {
+        let result = decrypt_credential("enc1:invalid_hex");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn to_app_config_no_keys() {
+        let config = StoredConfig {
+            api_key: None,
+            usage_token: None,
+            provider: "deepseek".to_string(),
+            mimo_token: None,
+            mimo_ph: None,
+            refresh_interval_seconds: 60,
+            auto_refresh_enabled: false,
+            autostart: false,
+            ..Default::default()
+        };
+        let app = to_app_config(config).unwrap();
+        assert!(!app.api_key_configured);
+        assert!(app.api_key_preview.is_none());
+        assert!(!app.usage_token_configured);
+        assert!(!app.mimo_token_configured);
+        assert_eq!(app.provider, "deepseek");
+    }
+
+    #[test]
+    fn to_app_config_with_keys() {
+        let config = StoredConfig {
+            api_key: Some("sk-abcde12345fghij67890".to_string()),
+            usage_token: Some("some-usage-token".to_string()),
+            provider: "mimo".to_string(),
+            mimo_token: Some("mimo-token".to_string()),
+            mimo_ph: None,
+            refresh_interval_seconds: 300,
+            auto_refresh_enabled: true,
+            autostart: true,
+            ..Default::default()
+        };
+        let app = to_app_config(config).unwrap();
+        assert!(app.api_key_configured);
+        assert!(app.api_key_preview.is_some());
+        assert!(app.usage_token_configured);
+        assert!(app.mimo_token_configured);
+        assert_eq!(app.provider, "mimo");
+        assert_eq!(app.refresh_interval_seconds, 300);
+        assert!(app.auto_refresh_enabled);
+        assert!(app.autostart);
+    }
+
+    #[test]
+    fn to_app_config_empty_keys_not_configured() {
+        let config = StoredConfig {
+            api_key: Some("".to_string()),
+            usage_token: Some("".to_string()),
+            provider: "deepseek".to_string(),
+            mimo_token: None,
+            mimo_ph: None,
+            refresh_interval_seconds: 60,
+            auto_refresh_enabled: false,
+            autostart: false,
+            ..Default::default()
+        };
+        let app = to_app_config(config).unwrap();
+        assert!(!app.api_key_configured);
+        assert!(!app.low_balance_notify);
+    }
+}
+
 pub fn read_stored_config() -> Result<StoredConfig, String> {
     let path = config_path()?;
     if !path.exists() {
@@ -256,6 +366,8 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, String> {
         auto_refresh_enabled: config.auto_refresh_enabled,
         autostart: config.autostart,
         config_path: path.to_string_lossy().to_string(),
+        low_balance_notify: config.low_balance_notify,
+        low_balance_threshold: config.low_balance_threshold,
     })
 }
 

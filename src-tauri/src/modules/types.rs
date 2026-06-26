@@ -21,6 +21,18 @@ pub struct StoredConfig {
     #[serde(default)]
     pub auto_refresh_enabled: bool,
     pub autostart: bool,
+    #[serde(default)]
+    pub window_width: Option<f64>,
+    #[serde(default)]
+    pub window_height: Option<f64>,
+    #[serde(default)]
+    pub window_x: Option<i32>,
+    #[serde(default)]
+    pub window_y: Option<i32>,
+    #[serde(default)]
+    pub low_balance_notify: bool,
+    #[serde(default)]
+    pub low_balance_threshold: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +47,10 @@ pub struct AppConfig {
     pub auto_refresh_enabled: bool,
     pub autostart: bool,
     pub config_path: String,
+    #[serde(default)]
+    pub low_balance_notify: bool,
+    #[serde(default)]
+    pub low_balance_threshold: f64,
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────

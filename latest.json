@@ -1,0 +1,11 @@
+{
+  "version": "2.2.1",
+  "notes": "v2.2.1 - 默认浅色主题、窗口定位修复、MiMo 查询优化、自动更新",
+  "pub_date": "2026-06-26T12:17:27.043Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTZmVwSzdSTTRFMm94M0tUTTluUU1XRVNGUExQdk9kTmwza1JJUU5jV0lBMFFhemN5SkJyL0hLWHhEQ0J2U2JsWElYbUxSRFFROHErUGtob3VORzhGMjV6Uzl6eC8vVmc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDc2MDY5CWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjIuMV94NjQtc2V0dXAuZXhlClZ5UjVycGthNTEwUGNNMk5KeXpBbk44TVlsSlgrUDNaN0oxYXNSMGpFdGRvQVlPRTFhS005dzBhVjJEY05ENXR1a3pieTBkVkFUWUNhd3c3a2I1ZUJBPT0K",
+      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.2.1/DeepSeekMonitorWindows_2.2.1_x64-setup.exe"
+    }
+  }
+}
