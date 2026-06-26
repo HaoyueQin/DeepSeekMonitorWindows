@@ -290,6 +290,12 @@ pub fn read_stored_config() -> Result<StoredConfig, String> {
     if let Some(ref token) = config.usage_token {
         config.usage_token = Some(decrypt_credential(token)?);
     }
+    if let Some(ref token) = config.mimo_token {
+        config.mimo_token = Some(decrypt_credential(token)?);
+    }
+    if let Some(ref ph) = config.mimo_ph {
+        config.mimo_ph = Some(decrypt_credential(ph)?);
+    }
     Ok(config)
 }
 
@@ -309,6 +315,9 @@ pub fn write_stored_config(config: &StoredConfig) -> Result<(), String> {
     }
     if let Some(ref token) = config.mimo_token {
         encrypted_config.mimo_token = Some(encrypt_credential(token)?);
+    }
+    if let Some(ref ph) = config.mimo_ph {
+        encrypted_config.mimo_ph = Some(encrypt_credential(ph)?);
     }
 
     let text =

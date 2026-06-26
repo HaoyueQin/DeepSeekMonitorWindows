@@ -148,11 +148,12 @@ pub async fn fetch_mimo_api_with_method(
     // Use serde_json::to_string for proper JS string escaping of the URL
     let safe_url = serde_json::to_string(&api_url).unwrap_or_else(|_| "\"\"".to_string());
     let safe_req_id = serde_json::to_string(&req_id).unwrap_or_else(|_| "\"\"".to_string());
+    let safe_method = serde_json::to_string(method).unwrap_or_else(|_| "\"GET\"".to_string());
     let js = format!(
         r#"(async function() {{
             try {{
                 var r = await fetch({safe_url}, {{
-                    method: '{method}',
+                    method: {safe_method},
                     credentials: 'include',
                     headers: {{ 'Accept': 'application/json' }}
                 }});
@@ -172,7 +173,6 @@ pub async fn fetch_mimo_api_with_method(
                 }});
             }}
         }})()"#,
-        method = method,
         port = cb_port,
     );
     window
@@ -251,7 +251,7 @@ fn parse_mimo_api_response<T: serde::de::DeserializeOwned>(json: &str) -> Result
 
 pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalanceResult, String> {
     let json = fetch_mimo_api(app, "/api/v1/balance", 15).await?;
-    log::info!("[MiMo] /api/v1/balance raw: {}", &json[..json.len().min(2000)]);
+    log::debug!("[MiMo] /api/v1/balance response received ({} chars)", json.len());
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -582,9 +582,7 @@ fn parse_detail_items(json: &str) -> Result<Vec<UsageDetailItem>, String> {
         return Err(format!("code={}", r.code));
     }
     let items = r.data.unwrap_or_default();
-    if let Some(first) = items.first() {
-        log::info!("[MiMo] parse_detail_items first item: {:?}", first);
-    }
+    log::debug!("[MiMo] parse_detail_items: {} items parsed", items.len());
     Ok(items)
 }
 
@@ -595,7 +593,7 @@ async fn fetch_mimo_usage_detail(
     {
         let config = read_stored_config()?;
         if let Some(ref ph) = config.mimo_ph {
-            log::info!("[MiMo] detail: trying cached ph={}", &ph[..ph.len().min(20)]);
+            log::debug!("[MiMo] detail: trying cached ph");
             let api_url = format!("/api/v1/usage/detail/list?api-platform_ph={}", ph);
             if let Ok(json) = fetch_mimo_api_with_method(app, &api_url, "POST", 10).await {
                 log::info!(
@@ -659,7 +657,7 @@ async fn fetch_mimo_usage_detail(
             if *request.method() == Method::Options {
                 let response = Response::from_string(String::new())
                     .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..])
                             .unwrap(),
                     )
                     .with_header(
@@ -686,7 +684,7 @@ async fn fetch_mimo_usage_detail(
                     }
                 }
                 let response = Response::from_string("OK").with_header(
-                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..]).unwrap(),
                 );
                 let _ = request.respond(response);
             }

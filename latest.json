@@ -1,11 +1,11 @@
 {
-  "version": "2.3.3",
-  "notes": "v2.3.3 - security hardening: JS injection fixes, CORS restriction, DPAPI error propagation",
-  "pub_date": "2026-06-26T16:19:55Z",
+  "version": "2.3.4",
+  "notes": "v2.3.4 - comprehensive code review fixes: security, logging, dead code, version alignment",
+  "pub_date": "2026-06-26T16:35:44Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRVMxejkzQXgzcUV4QnVhL1dGU3dVT28xNjk1bXY0VnVMZ3ZHNDhXVFNua0FYd0R5RmxZMkpIci9uUCtCMGVNVWcrcHEyaHdUTmVsSm1nRnROZXZEZ2dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDkwNzg0CWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjMuM194NjQtc2V0dXAuZXhlClN3RXJLK2V6Um9uL0NRMVVoMkhJbXNTR3VkaW9qK2Y0dVhlZ2lTTHFGRTc1c3JheWdXSzVjTWtML3YyMmRDUjNpYUF4bk5TbkR4UTBHck15M2FsQUNRPT0K",
-      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.3.3/DeepSeekMonitorWindows_2.3.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRVZ4a3hGMlFEUXNCYm5jS2dPWGFmU3BTTGZsczdMSzVyN3hjckpNa3BYQlJRQ3ZiNUFFSXc1eHJxU2pJcHF2R29LUURIZEFDNjJabWVIMzFRWUM1UVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDkxNzMzCWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjMuNF94NjQtc2V0dXAuZXhlCjV3WkR2eWlqd2NocVdhZC9QcnVJN1dGamcraUprY2xiaHpRUmRUQTJCVUtpNDBtdHBQQ3poZCtlR1VaWW9ZVnlyWDgvVnVsOTRGT3E2T2hKdUY4bUFnPT0K",
+      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.3.4/DeepSeekMonitorWindows_2.3.4_x64-setup.exe"
     }
   }
 }
