@@ -322,6 +322,8 @@ fn mimo_api_response(
 
 // ─── 自动更新 ──────────────────────────────────────────────
 
+struct PendingUpdate(std::sync::Mutex<Option<tauri_plugin_updater::Update>>);
+
 #[derive(serde::Serialize)]
 struct UpdateInfo {
     version: String,
@@ -329,19 +331,62 @@ struct UpdateInfo {
     body: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "event", content = "data")]
+enum DownloadEvent {
+    #[serde(rename_all = "camelCase")]
+    Started { content_length: Option<u64> },
+    #[serde(rename_all = "camelCase")]
+    Progress { chunk_length: usize, downloaded: u64 },
+    Finished,
+}
+
 #[tauri::command]
-async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+async fn check_update(app: tauri::AppHandle, pending: tauri::State<'_, PendingUpdate>) -> Result<Option<UpdateInfo>, String> {
     use tauri_plugin_updater::UpdaterExt;
     let updater = app.updater().map_err(|e| format!("获取更新器失败：{e}"))?;
     match updater.check().await {
-        Ok(Some(update)) => Ok(Some(UpdateInfo {
-            version: update.version.clone(),
-            date: update.date.map(|d| d.to_string()).unwrap_or_default(),
-            body: update.body.clone().unwrap_or_default(),
-        })),
+        Ok(Some(update)) => {
+            let info = UpdateInfo {
+                version: update.version.clone(),
+                date: update.date.map(|d| {
+                    let y = d.year();
+                    let m = d.month() as u8;
+                    let day = d.day();
+                    format!("{y}-{m:02}-{day:02}")
+                }).unwrap_or_default(),
+                body: update.body.clone().unwrap_or_default(),
+            };
+            *pending.0.lock().unwrap() = Some(update);
+            Ok(Some(info))
+        }
         Ok(None) => Ok(None),
         Err(e) => Err(format!("检查更新失败：{e}")),
     }
+}
+
+#[tauri::command]
+async fn install_update(pending: tauri::State<'_, PendingUpdate>, on_event: tauri::ipc::Channel<DownloadEvent>) -> Result<(), String> {
+    let update = pending.0.lock().unwrap().take().ok_or("没有待安装的更新")?;
+    let mut downloaded: u64 = 0;
+    let mut started = false;
+    update
+        .download_and_install(
+            |chunk_len, content_len| {
+                if !started {
+                    let _ = on_event.send(DownloadEvent::Started { content_length: content_len });
+                    started = true;
+                }
+                downloaded += chunk_len as u64;
+                let _ = on_event.send(DownloadEvent::Progress { chunk_length: chunk_len, downloaded });
+            },
+            || {
+                let _ = on_event.send(DownloadEvent::Finished);
+            },
+        )
+        .await
+        .map_err(|e| format!("下载安装失败：{e}"))?;
+    Ok(())
 }
 
 // ─── 主入口 ──────────────────────────────────────────────
@@ -359,6 +404,7 @@ pub fn run() {
         .manage(Arc::new(tokio::sync::Mutex::new(())))
         .manage(Mutex::new(MimoDetailCache::new()))
         .manage(Mutex::new(CallbackServerPort(0)))
+        .manage(PendingUpdate(std::sync::Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             hide_main_window,
             resize_window,
@@ -382,9 +428,11 @@ pub fn run() {
             start_mimo_sync,
             ensure_mimo_webview,
             mimo_api_response,
-            check_update
+            check_update,
+            install_update
         ])
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

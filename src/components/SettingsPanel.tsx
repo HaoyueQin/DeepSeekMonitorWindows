@@ -41,6 +41,9 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
   const [updateInfo, setUpdateInfo] = React.useState<{ version: string; date: string; body: string } | null>(null);
   const [updateChecked, setUpdateChecked] = React.useState(false);
+  const [downloading, setDownloading] = React.useState(false);
+  const [downloadProgress, setDownloadProgress] = React.useState<{ downloaded: number; total: number | null } | null>(null);
+  const [downloadDone, setDownloadDone] = React.useState(false);
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   React.useEffect(() => {
@@ -99,6 +102,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     setCheckingUpdate(true);
     setUpdateChecked(false);
     setUpdateInfo(null);
+    setDownloadDone(false);
+    setDownloadProgress(null);
     void invoke<{ version: string; date: string; body: string } | null>("check_update")
       .then((info) => {
         setUpdateInfo(info);
@@ -110,6 +115,33 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         console.warn("检查更新失败:", err);
       })
       .finally(() => setCheckingUpdate(false));
+  }, []);
+
+  const handleInstallUpdate = React.useCallback(async () => {
+    setDownloading(true);
+    setDownloadProgress(null);
+    try {
+      const { Channel } = await import("@tauri-apps/api/core");
+      const onEvent = new Channel<{ event: string; data?: { contentLength?: number; chunkLength?: number; downloaded?: number } }>();
+      onEvent.onmessage = (msg) => {
+        if (msg.event === "Started") {
+          setDownloadProgress({ downloaded: 0, total: msg.data?.contentLength ?? null });
+        } else if (msg.event === "Progress") {
+          setDownloadProgress((prev) => ({ downloaded: (prev?.downloaded ?? 0) + (msg.data?.chunkLength ?? 0), total: prev?.total ?? null }));
+        } else if (msg.event === "Finished") {
+          setDownloadDone(true);
+          setDownloading(false);
+        }
+      };
+      await invoke("install_update", { onEvent });
+      // On Windows, the app auto-exits after install. If we're still here, relaunch.
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    } catch (e) {
+      console.warn("下载安装失败:", e);
+      setDownloading(false);
+      setDownloadProgress(null);
+    }
   }, []);
 
   const [lang, setLangState] = React.useState(getLang());
@@ -260,16 +292,38 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         <SettingsSection icon={<Info size={15} />} title={t('settings.about')}>
           <div className="version-row"><span>{t('settings.version')}</span><strong>v{appVersion}</strong></div>
           <div className="settings-actions" style={{ marginTop: 8 }}>
-            <button className="primary" onClick={handleCheckUpdate} disabled={checkingUpdate}>
-              {checkingUpdate ? t('settings.checking') : t('settings.check_update')}
-            </button>
-            {updateInfo && <span className="configured"><CheckCircle2 size={17} />{t('settings.update_found')} v{updateInfo.version}</span>}
+            {!updateInfo && (
+              <button className="primary" onClick={handleCheckUpdate} disabled={checkingUpdate}>
+                {checkingUpdate ? t('settings.checking') : t('settings.check_update')}
+              </button>
+            )}
+            {updateInfo && !downloading && !downloadDone && (
+              <button className="primary" onClick={handleInstallUpdate}>
+                {t('settings.download_update')} v{updateInfo.version}
+              </button>
+            )}
+            {downloading && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ height: 6, borderRadius: 3, background: 'rgba(var(--fg), 0.1)', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 3, background: 'var(--accent, #4f8cff)',
+                    width: downloadProgress?.total ? `${Math.min(100, (downloadProgress.downloaded / downloadProgress.total) * 100).toFixed(1)}%` : '30%',
+                    transition: downloadProgress?.total ? 'width 0.2s' : 'none',
+                  }} />
+                </div>
+                <span style={{ fontSize: '0.8em', color: 'var(--muted)' }}>
+                  {downloadProgress?.total
+                    ? `${(downloadProgress.downloaded / 1024 / 1024).toFixed(1)} / ${(downloadProgress.total / 1024 / 1024).toFixed(1)} MB (${Math.min(100, (downloadProgress.downloaded / downloadProgress.total) * 100).toFixed(1)}%)`
+                    : t('settings.downloading_update')}
+                </span>
+              </div>
+            )}
+            {downloadDone && <span className="configured"><CheckCircle2 size={17} />{t('settings.update_installed')}</span>}
             {!updateInfo && updateChecked && <span className="configured muted-status">{t('settings.latest')}</span>}
           </div>
-          {updateInfo && (
+          {updateInfo && !downloading && !downloadDone && (
             <div style={{ marginTop: 8 }}>
               <p className="muted">v{updateInfo.version} {updateInfo.date ? `(${updateInfo.date})` : ""}</p>
-              <p className="muted"><a href="https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases" target="_blank" rel="noopener noreferrer">GitHub Releases</a></p>
             </div>
           )}
         </SettingsSection>

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DeepSeekMonitorWindows",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "identifier": "com.deepseek.monitor.windows",
   "build": {
     "frontendDist": "../dist",
@@ -55,7 +55,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBMDRDRTQ0QkI5MjdBOUYKUldTZmVwSzdSTTRFMm03cjdUMnhKek5laENsbDJFWnE1ODFsZnlNeEQ1dEJQaEdPRUl0R0dtWHUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExQjVCMzkwNThBQ0FBREIKUldUYnFxeFlrTE8xRVdrSVozK0ZjL3lyZ2ZpVUE4UllnWnU4TFBKQ3BJSjZtY25sUXg1R0hBeGcK",
       "endpoints": [
         "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/latest/download/latest.json"
       ],
