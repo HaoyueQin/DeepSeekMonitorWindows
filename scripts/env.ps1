@@ -1,38 +1,5 @@
 $ErrorActionPreference = "Stop"
 
-function Resolve-VsDevCmd {
-  $paths = @()
-
-  $vswhereRoot = ${env:ProgramFiles(x86)}
-  if ($vswhereRoot) {
-    $vswhere = Join-Path $vswhereRoot "Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path -LiteralPath $vswhere) {
-      $installationPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-      if ($installationPath) {
-        $paths += (Join-Path $installationPath "Common7\Tools\VsDevCmd.bat")
-      }
-    }
-  }
-
-  foreach ($root in @(${env:ProgramFiles}, ${env:ProgramFiles(x86)})) {
-    if (-not $root) {
-      continue
-    }
-
-    foreach ($edition in @("BuildTools", "Community", "Professional", "Enterprise")) {
-      $paths += (Join-Path $root "Microsoft Visual Studio\2022\$edition\Common7\Tools\VsDevCmd.bat")
-    }
-  }
-
-  foreach ($path in $paths) {
-    if (Test-Path -LiteralPath $path) {
-      return $path
-    }
-  }
-
-  throw "Visual Studio Build Tools not found. Install Visual Studio Build Tools 2022 with Desktop development with C++."
-}
-
 $project = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $root = Split-Path -Parent $project
 
