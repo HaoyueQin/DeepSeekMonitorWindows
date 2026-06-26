@@ -1,11 +1,11 @@
 {
-  "version": "2.3.4",
-  "notes": "v2.3.4 - comprehensive code review fixes: security, logging, dead code, version alignment",
-  "pub_date": "2026-06-26T16:35:44Z",
+  "version": "2.4.0",
+  "notes": "v2.4.0 - settings restructure, theme/currency/unit customization",
+  "pub_date": "2026-06-26T17:17:12Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRVZ4a3hGMlFEUXNCYm5jS2dPWGFmU3BTTGZsczdMSzVyN3hjckpNa3BYQlJRQ3ZiNUFFSXc1eHJxU2pJcHF2R29LUURIZEFDNjJabWVIMzFRWUM1UVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDkxNzMzCWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjMuNF94NjQtc2V0dXAuZXhlCjV3WkR2eWlqd2NocVdhZC9QcnVJN1dGamcraUprY2xiaHpRUmRUQTJCVUtpNDBtdHBQQ3poZCtlR1VaWW9ZVnlyWDgvVnVsOTRGT3E2T2hKdUY4bUFnPT0K",
-      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.3.4/DeepSeekMonitorWindows_2.3.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRWJUd1llemdYUDNYVWwxeDgzTERLdXpMckI1a0xjVnh5eWxocXo0RjB1eFVLZERwTWYrcXlLOEc5MjhVc3hSOTJMYTBldUZwVWZvaUpCbXBBUFhKYkFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDk0MjI2CWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjQuMF94NjQtc2V0dXAuZXhlCmh4K0pRWmRkMmpCVSt4VS9Yb0R1eDB6amhybXBBNW5BSnhZaWhtTm1nRmxodXBPSlk2amZKVjlmMUkwREUxN3R2NlFmdGZEOUJEckNLekl4dlA0d0R3PT0K",
+      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.4.0/DeepSeekMonitorWindows_2.4.0_x64-setup.exe"
     }
   }
 }

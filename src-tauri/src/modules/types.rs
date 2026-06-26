@@ -33,7 +33,14 @@ pub struct StoredConfig {
     pub low_balance_notify: bool,
     #[serde(default)]
     pub low_balance_threshold: f64,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_currency_unit")]
+    pub currency_unit: String,
 }
+
+fn default_theme() -> String { "light".to_string() }
+fn default_currency_unit() -> String { "cny".to_string() }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +58,10 @@ pub struct AppConfig {
     pub low_balance_notify: bool,
     #[serde(default)]
     pub low_balance_threshold: f64,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_currency_unit")]
+    pub currency_unit: String,
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────

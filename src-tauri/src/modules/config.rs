@@ -377,6 +377,8 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, String> {
         config_path: path.to_string_lossy().to_string(),
         low_balance_notify: config.low_balance_notify,
         low_balance_threshold: config.low_balance_threshold,
+        theme: config.theme,
+        currency_unit: config.currency_unit,
     })
 }
 

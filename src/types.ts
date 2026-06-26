@@ -14,6 +14,8 @@ export type AppConfig = {
   configPath: string;
   lowBalanceNotify: boolean;
   lowBalanceThreshold: number;
+  theme: "light" | "dark" | "system";
+  currencyUnit: "cny" | "usd" | "cny_mt";
 };
 
 export type BalanceData = {

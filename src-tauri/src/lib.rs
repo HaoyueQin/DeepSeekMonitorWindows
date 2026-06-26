@@ -195,6 +195,28 @@ fn save_low_balance_threshold(threshold: f64) -> Result<AppConfig, String> {
     config::to_app_config(config)
 }
 
+#[tauri::command]
+fn save_theme(theme: String) -> Result<AppConfig, String> {
+    if !["light", "dark", "system"].contains(&theme.as_str()) {
+        return Err("无效主题".to_string());
+    }
+    let mut config = config::read_stored_config()?;
+    config.theme = theme;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_currency_unit(unit: String) -> Result<AppConfig, String> {
+    if !["cny", "usd", "cny_mt"].contains(&unit.as_str()) {
+        return Err("无效货币单位".to_string());
+    }
+    let mut config = config::read_stored_config()?;
+    config.currency_unit = unit;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
 /// 余额检查并发送 Windows 通知
 fn check_and_notify_low_balance(_app: &tauri::AppHandle, balance: &BalanceResult) {
     let config = match config::read_stored_config() {
@@ -416,6 +438,8 @@ pub fn run() {
             save_autostart,
             save_low_balance_notify,
             save_low_balance_threshold,
+            save_theme,
+            save_currency_unit,
             set_provider,
             fetch_balance,
             save_usage_token,
