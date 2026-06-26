@@ -121,12 +121,12 @@ fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
-pub fn encrypt_credential(plain: &str) -> String {
+pub fn encrypt_credential(plain: &str) -> Result<String, String> {
     match dpapi_encrypt(plain.as_bytes()) {
-        Ok(encrypted) => format!("enc1:{}", hex_encode(&encrypted)),
-        Err(_) => {
-            log::warn!("DPAPI 加密失败，将明文保存凭据");
-            plain.to_string()
+        Ok(encrypted) => Ok(format!("enc1:{}", hex_encode(&encrypted))),
+        Err(e) => {
+            log::error!("DPAPI 加密失败: {}", e);
+            Err(format!("DPAPI 加密失败，凭据未保存: {}", e))
         }
     }
 }
@@ -302,13 +302,13 @@ pub fn write_stored_config(config: &StoredConfig) -> Result<(), String> {
     // 加密凭据后写入
     let mut encrypted_config = config.clone();
     if let Some(ref key) = config.api_key {
-        encrypted_config.api_key = Some(encrypt_credential(key));
+        encrypted_config.api_key = Some(encrypt_credential(key)?);
     }
     if let Some(ref token) = config.usage_token {
-        encrypted_config.usage_token = Some(encrypt_credential(token));
+        encrypted_config.usage_token = Some(encrypt_credential(token)?);
     }
     if let Some(ref token) = config.mimo_token {
-        encrypted_config.mimo_token = Some(encrypt_credential(token));
+        encrypted_config.mimo_token = Some(encrypt_credential(token)?);
     }
 
     let text =

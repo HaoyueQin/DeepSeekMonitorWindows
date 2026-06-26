@@ -145,10 +145,13 @@ pub async fn fetch_mimo_api_with_method(
     }
 
     let api_url = format!("https://platform.xiaomimimo.com{}", path);
+    // Use serde_json::to_string for proper JS string escaping of the URL
+    let safe_url = serde_json::to_string(&api_url).unwrap_or_else(|_| "\"\"".to_string());
+    let safe_req_id = serde_json::to_string(&req_id).unwrap_or_else(|_| "\"\"".to_string());
     let js = format!(
         r#"(async function() {{
             try {{
-                var r = await fetch('{url}', {{
+                var r = await fetch({safe_url}, {{
                     method: '{method}',
                     credentials: 'include',
                     headers: {{ 'Accept': 'application/json' }}
@@ -158,21 +161,19 @@ pub async fn fetch_mimo_api_with_method(
                     method: 'POST',
                     mode: 'cors',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ reqId: '{req_id}', data: t }})
+                    body: JSON.stringify({{ reqId: {safe_req_id}, data: t }})
                 }});
             }} catch(e) {{
                 fetch('http://127.0.0.1:{port}/mimo-callback', {{
                     method: 'POST',
                     mode: 'cors',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ reqId: '{req_id}', data: 'ERROR:' + e.message }})
+                    body: JSON.stringify({{ reqId: {safe_req_id}, data: 'ERROR:' + e.message }})
                 }});
             }}
         }})()"#,
-        url = api_url,
         method = method,
         port = cb_port,
-        req_id = req_id,
     );
     window
         .eval(&js)
@@ -198,9 +199,11 @@ pub async fn fetch_mimo_api_with_method(
                                 .and_then(|v| v.as_str())
                         });
                     if let Some(url) = login_url {
+                        // Use serde_json::to_string for proper JS string escaping
+                        let safe_url = serde_json::to_string(url).unwrap_or_default();
                         let _ = window.eval(&format!(
-                            "window.location.href='{}'",
-                            url.replace('\'', "\\'")
+                            "window.location.href={}",
+                            safe_url
                         ));
                     } else {
                         let _ = window.eval("window.location.href='https://account.xiaomi.com/pass/serviceLogin?sid=platform.xiaomimimo.com'");

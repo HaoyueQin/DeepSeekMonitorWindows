@@ -357,6 +357,11 @@ pub fn start_usage_sync(app: &tauri::AppHandle) -> Result<bool, String> {
         .center()
         .visible(true)
         .initialization_script(USAGE_SYNC_POLL_JS)
+        .on_navigation(|url| {
+            // Restrict navigation to DeepSeek domains only
+            url.host_str()
+                .is_some_and(|host| host == "platform.deepseek.com" || host == "chat.deepseek.com")
+        })
         .on_page_load(|window, payload| {
             if matches!(payload.event(), PageLoadEvent::Finished)
                 && payload

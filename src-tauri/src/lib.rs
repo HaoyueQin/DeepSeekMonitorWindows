@@ -38,7 +38,7 @@ impl CallbackServer {
                 if *request.method() == Method::Options {
                     let response = Response::from_string(String::new())
                         .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..])
                                 .unwrap(),
                         )
                         .with_header(
@@ -71,7 +71,7 @@ impl CallbackServer {
                         }
                     }
                     let response = Response::from_string("OK").with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..]).unwrap(),
                     );
                     let _ = request.respond(response);
                 }
