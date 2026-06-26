@@ -1,10 +1,10 @@
 {
   "version": "2.4.0",
-  "notes": "v2.4.0 - settings restructure, theme/currency/unit customization",
-  "pub_date": "2026-06-26T17:17:12Z",
+  "notes": "v2.4.0 - settings restructure, currency/theme/exchange rate",
+  "pub_date": "2026-06-26T18:32:56Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRWJUd1llemdYUDNYVWwxeDgzTERLdXpMckI1a0xjVnh5eWxocXo0RjB1eFVLZERwTWYrcXlLOEc5MjhVc3hSOTJMYTBldUZwVWZvaUpCbXBBUFhKYkFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDk0MjI2CWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjQuMF94NjQtc2V0dXAuZXhlCmh4K0pRWmRkMmpCVSt4VS9Yb0R1eDB6amhybXBBNW5BSnhZaWhtTm1nRmxodXBPSlk2amZKVjlmMUkwREUxN3R2NlFmdGZEOUJEckNLekl4dlA0d0R3PT0K",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRVQ1UDZtKy90NWJoVUtISzF6WGI5MnJpaC9TYmcvVjdVdnBCaGl3R1h3dUFCSkYvVEx5NW5HTmh3UUFnRVZxZG8rRlpRaDRGb2NMeFpqN2R0MXBKVndZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDk4NzY4CWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjQuMF94NjQtc2V0dXAuZXhlCm8rQm1KRXhud09xejRNcHVwOVZERUNkNWF0aXI0a1J3R1hqdzJLQi9PY1ZCaGkwaTlJMWc5eDh3SzVaOTlRNlJieENHNXlYTTZMa1ZUTDU5WHVydkRnPT0K",
       "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.4.0/DeepSeekMonitorWindows_2.4.0_x64-setup.exe"
     }
   }
