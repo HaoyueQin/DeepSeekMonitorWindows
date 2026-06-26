@@ -296,6 +296,11 @@ pub fn run() {
             // 初始化托盘
             tray::setup_tray(app)?;
 
+            // 首次启动时将窗口定位到屏幕右下角
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = tray::position_near_tray(&window);
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())

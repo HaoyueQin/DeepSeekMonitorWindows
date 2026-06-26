@@ -212,6 +212,8 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
 }) {
   const [theme, setTheme] = React.useState<string>(() => localStorage.getItem("ui-theme") || "light");
   const toggleTheme = () => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); localStorage.setItem("ui-theme", next); document.documentElement.setAttribute("data-theme", next); };
+  // 首次加载时设置 data-theme 属性，确保 CSS 主题生效
+  React.useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
 
   const isDeepSeek = provider === "deepseek";
   const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
