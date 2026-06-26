@@ -1,11 +1,11 @@
 {
-  "version": "2.3.1",
-  "notes": "v2.3.1 - one-click update with download progress, date format fix",
-  "pub_date": "2026-06-26T15:29:12Z",
+  "version": "2.3.2",
+  "notes": "v2.3.2 - updater bug fixes from code review",
+  "pub_date": "2026-06-26T15:52:44Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRWNSeW9mRE8zOS9POTM1TnUvb2V3UVFXcFBCYzhGNU56R0RhUHdNdVMyRVV3eDZXVStsVlZXVnN2bWhBZ0NLZ1RzblhvdnU4eGl2cXJRM0JzRCtDdFFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDg3NzQwCWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjMuMV94NjQtc2V0dXAuZXhlCjZiRDNicDZzUDlIWDFoNGtuZ3p1Z2tYcGpaNU1lNG11SGt4UlVHL01ML1BoMlVZYWpqNFFlT1NNVmFYTHk4NTR3aXgzMlFYdXBkMWFkWGNTT3BXN0FBPT0K",
-      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.3.1/DeepSeekMonitorWindows_2.3.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYnFxeFlrTE8xRWVWR1doQ3FEYVROc3l5MUVxelE5bGREd2UrbUNFekpReEJGeVlzbUdQdWozaTU1WU9jNjFmR0gvZmpvVW5kWnQwNWIyRG83YTVGQmtOblA2NWRrNFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNDg5MTA5CWZpbGU6RGVlcFNlZWtNb25pdG9yV2luZG93c18yLjMuMl94NjQtc2V0dXAuZXhlCkNyYjVoMm5VTHNTcW9FUWtnTmpFUi9JVWd5QVoyVzlOdTRCZjQ0dFBQNG51NDRXWnYrd2JJQmV0bWQ4RW81aVpVV1c1TmxMeEkrdVMzRC9BejlQbkJBPT0K",
+      "url": "https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases/download/v2.3.2/DeepSeekMonitorWindows_2.3.2_x64-setup.exe"
     }
   }
 }

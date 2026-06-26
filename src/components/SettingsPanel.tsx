@@ -120,6 +120,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const handleInstallUpdate = React.useCallback(async () => {
     setDownloading(true);
     setDownloadProgress(null);
+    setDownloadDone(false);
     try {
       const { Channel } = await import("@tauri-apps/api/core");
       const onEvent = new Channel<{ event: string; data?: { contentLength?: number; chunkLength?: number; downloaded?: number } }>();
@@ -127,19 +128,20 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         if (msg.event === "Started") {
           setDownloadProgress({ downloaded: 0, total: msg.data?.contentLength ?? null });
         } else if (msg.event === "Progress") {
-          setDownloadProgress((prev) => ({ downloaded: (prev?.downloaded ?? 0) + (msg.data?.chunkLength ?? 0), total: prev?.total ?? null }));
+          // Use server-side cumulative downloaded value directly
+          setDownloadProgress((prev) => ({ downloaded: msg.data?.downloaded ?? prev?.downloaded ?? 0, total: prev?.total ?? null }));
         } else if (msg.event === "Finished") {
           setDownloadDone(true);
           setDownloading(false);
         }
       };
       await invoke("install_update", { onEvent });
-      // On Windows, the app auto-exits after install. If we're still here, relaunch.
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
+      // On Windows/NSIS, the process exits during install — this line is unreachable.
+      // The NSIS installer handles restart via its /UPDATE flag.
     } catch (e) {
       console.warn("下载安装失败:", e);
       setDownloading(false);
+      setDownloadDone(false);
       setDownloadProgress(null);
     }
   }, []);
