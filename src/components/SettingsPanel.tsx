@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
 import { fmtMoney } from "../utils";
+import { t, getLang, setLang, type Lang, LANG_OPTIONS, PINNED_LANGS } from "../i18n";
 
 const refreshOptions = [
   { label: "1 分钟", value: 60 },
@@ -28,6 +29,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [refresh, setRefresh] = React.useState(60);
   const [autoRefresh, setAutoRefresh] = React.useState(false);
   const [autostart, setAutostart] = React.useState(false);
+  const [lowBalanceNotify, setLowBalanceNotify] = React.useState(false);
+  const [lowBalanceThreshold, setLowBalanceThreshold] = React.useState("5.00");
   const [usageToken, setUsageToken] = React.useState("");
   const [usageStatus, setUsageStatus] = React.useState("");
   const [usageSyncing, setUsageSyncing] = React.useState(false);
@@ -41,7 +44,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   React.useEffect(() => {
-    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); }).catch(() => setStatus("浏览器预览模式"));
+    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); }).catch(() => setStatus("浏览器预览模式"));
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
@@ -80,6 +83,18 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const saveAutoRefreshEnabled = React.useCallback((e: boolean) => { const p = autoRefresh; setAutoRefresh(e); onAutoRefreshChanged(e); void invoke<AppConfig>("save_auto_refresh_enabled", { autoRefreshEnabled: e }).then((c) => { setConfig(c); setAutoRefresh(c.autoRefreshEnabled); onAutoRefreshChanged(c.autoRefreshEnabled); }).catch(() => { setAutoRefresh(p); onAutoRefreshChanged(p); }); }, [autoRefresh, onAutoRefreshChanged]);
   const saveAutostart = React.useCallback((e: boolean) => { const p = autostart; setAutostart(e); void invoke<AppConfig>("save_autostart", { autostart: e }).then((c) => { setConfig(c); setAutostart(c.autostart); }).catch(() => setAutostart(p)); }, [autostart]);
 
+  const saveLowBalanceNotify = React.useCallback((e: boolean) => {
+    const p = lowBalanceNotify; setLowBalanceNotify(e);
+    void invoke<AppConfig>("save_low_balance_notify", { enabled: e }).then((c) => { setConfig(c); setLowBalanceNotify(c.lowBalanceNotify); }).catch(() => setLowBalanceNotify(p));
+  }, [lowBalanceNotify]);
+  const saveLowBalanceThreshold = React.useCallback((val: string) => {
+    setLowBalanceThreshold(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num >= 0) {
+      void invoke<AppConfig>("save_low_balance_threshold", { threshold: num }).then((c) => { setConfig(c); }).catch(() => {});
+    }
+  }, []);
+
   const handleCheckUpdate = React.useCallback(() => {
     setCheckingUpdate(true);
     setUpdateChecked(false);
@@ -97,13 +112,25 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       .finally(() => setCheckingUpdate(false));
   }, []);
 
+  const [lang, setLangState] = React.useState(getLang());
+
+  const [langOpen, setLangOpen] = React.useState(false);
+  const langRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => { if (langRef.current && !langRef.current.contains(e.target as Node)) setLangOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const currentLangLabel = LANG_OPTIONS.find(l => l.code === lang)?.label || '简体中文';
+
   return (
     <section className="settings-panel" data-testid="settings-panel">
       <button className="floating-close settings-close" onClick={onBack} aria-label="返回主面板"><X size={20} /></button>
       <div className="settings-inner">
         <header className="settings-header" data-tauri-drag-region>
           <button className="provider-toggle" onClick={() => onProviderChange(provider === "deepseek" ? "mimo" : "deepseek")}>{provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}</button>
-          <div><p>设置</p></div>
+          <div><p>{t('settings.title')}</p></div>
         </header>
 
         <SettingsSection icon={<KeyRound size={15} />} title="API Key">
@@ -148,36 +175,101 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           </SettingsSection>
         )}
 
-        <SettingsSection icon={<Power size={15} />} title="通用">
-          <Toggle label="开机自启" checked={autostart} onChange={saveAutostart} />
-          <p>开启后，每次登录 Windows 时自动启动 {provider === "deepseek" ? "DeepSeek" : "MiMo"} Monitor。</p>
-          <Toggle label="自动刷新" checked={autoRefresh} onChange={saveAutoRefreshEnabled} />
-          <p>开启后，按设定周期自动从 {provider === "deepseek" ? "DeepSeek" : "MiMo"} API 拉取最新数据。</p>
+        <SettingsSection icon={<Power size={15} />} title={t('settings.general')}>
+          <Toggle label={t('settings.autostart')} checked={autostart} onChange={saveAutostart} />
+          <p>{t('settings.autostart_desc')}</p>
+          <Toggle label={t('settings.auto_refresh')} checked={autoRefresh} onChange={saveAutoRefreshEnabled} />
+          <p>{t('settings.auto_refresh_desc')}</p>
           {autoRefresh && (<div className="segmented">{refreshOptions.map((o) => (<button key={o.value} className={refresh === o.value ? "selected" : ""} onClick={() => saveRefreshInterval(o.value)}>{o.label}</button>))}</div>)}
         </SettingsSection>
 
-        <SettingsSection icon={<Settings size={15} />} title="窗口大小">
-          <p>选择预设窗口尺寸，或拖拽窗口边缘自由调整。</p>
+        <SettingsSection icon={<Power size={15} />} title={t('notify.title')}>
+          <Toggle label={t('notify.toggle')} checked={lowBalanceNotify} onChange={saveLowBalanceNotify} />
+          <p>{t('notify.desc')}</p>
+          {lowBalanceNotify && (
+            <div className="key-row" style={{ marginTop: 8 }}>
+              <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginRight: 8 }}>{t('notify.threshold')}：</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={lowBalanceThreshold}
+                onChange={(e) => saveLowBalanceThreshold(e.target.value)}
+                style={{ width: 100 }}
+              />
+              <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginLeft: 4 }}>¥</span>
+            </div>
+          )}
+        </SettingsSection>
+
+        <SettingsSection icon={<Settings size={15} />} title={t('settings.window_size')}>
+          <p>{t('settings.window_desc')}</p>
           <div className="segmented">
-            {[{ label: "紧凑", w: 380, h: 600 }, { label: "标准", w: 463, h: 660 }, { label: "宽屏", w: 600, h: 700 }, { label: "大屏", w: 660, h: 900 }].map((preset) => (
+            {[{ label: t('settings.compact'), w: 380, h: 600 }, { label: t('settings.standard'), w: 463, h: 660 }, { label: t('settings.wide'), w: 600, h: 700 }, { label: t('settings.large'), w: 660, h: 900 }].map((preset) => (
               <button key={preset.label} onClick={() => { void invoke("resize_window", { width: preset.w, height: preset.h }).catch(() => {}); }}>{preset.label}</button>
             ))}
           </div>
         </SettingsSection>
 
-        <SettingsSection icon={<Info size={15} />} title="关于">
-          <div className="version-row"><span>当前版本</span><strong>v{appVersion}</strong></div>
+        <SettingsSection icon={<Info size={15} />} title={t('settings.language')}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <p style={{ margin: 0 }}>{t('settings.language_desc')}</p>
+            <div className="lang-select" ref={langRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                className="lang-select-btn"
+                onClick={() => setLangOpen(!langOpen)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', border: '1px solid rgba(var(--fg), 0.2)', borderRadius: 6, background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: '0.85em' }}
+              >
+                <span>{currentLangLabel}</span>
+                <span style={{ fontSize: '0.7em', opacity: 0.6 }}>▼</span>
+              </button>
+              {langOpen && (
+                <div className="lang-dropdown" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: 'var(--glass-tooltip-tint)', border: '1px solid rgba(var(--fg), 0.15)', borderRadius: 8, overflow: 'hidden', zIndex: 100, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', minWidth: 160, maxHeight: 380, overflowY: 'auto' }}>
+                  {/* 顶部固定区：zh + en */}
+                  {PINNED_LANGS.map((code) => {
+                    const opt = LANG_OPTIONS.find(o => o.code === code);
+                    if (!opt) return null;
+                    return (
+                      <button
+                        key={'pinned-' + code}
+                        onClick={() => { setLang(code); setLangState(code); setLangOpen(false); }}
+                        style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', background: lang === code ? 'rgba(var(--fg), 0.1)' : 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: '0.85em' }}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                  {/* 分隔线 */}
+                  <div style={{ borderTop: '1px solid rgba(var(--fg), 0.12)', margin: '2px 8px' }} />
+                  {/* 全部 17 种语言按 Unicode 排序 */}
+                  {LANG_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.code}
+                      onClick={() => { setLang(opt.code); setLangState(opt.code); setLangOpen(false); }}
+                      style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', background: lang === opt.code ? 'rgba(var(--fg), 0.1)' : 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: '0.85em' }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection icon={<Info size={15} />} title={t('settings.about')}>
+          <div className="version-row"><span>{t('settings.version')}</span><strong>v{appVersion}</strong></div>
           <div className="settings-actions" style={{ marginTop: 8 }}>
             <button className="primary" onClick={handleCheckUpdate} disabled={checkingUpdate}>
-              {checkingUpdate ? "检查中…" : "检查更新"}
+              {checkingUpdate ? t('settings.checking') : t('settings.check_update')}
             </button>
-            {updateInfo && <span className="configured"><CheckCircle2 size={17} />发现新版本 v{updateInfo.version}</span>}
-            {!updateInfo && updateChecked && <span className="configured muted-status">已是最新版本</span>}
+            {updateInfo && <span className="configured"><CheckCircle2 size={17} />{t('settings.update_found')} v{updateInfo.version}</span>}
+            {!updateInfo && updateChecked && <span className="configured muted-status">{t('settings.latest')}</span>}
           </div>
           {updateInfo && (
             <div style={{ marginTop: 8 }}>
-              <p className="muted">新版本 v{updateInfo.version} 已发布{updateInfo.date ? ` (${updateInfo.date})` : ""}。</p>
-              <p className="muted">请前往 <a href="https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases" target="_blank" rel="noopener noreferrer">GitHub Releases</a> 下载最新安装包。</p>
+              <p className="muted">v{updateInfo.version} {updateInfo.date ? `(${updateInfo.date})` : ""}</p>
+              <p className="muted"><a href="https://github.com/HaoyueQin/DeepSeekMonitorWindows/releases" target="_blank" rel="noopener noreferrer">GitHub Releases</a></p>
             </div>
           )}
         </SettingsSection>

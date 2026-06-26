@@ -180,6 +180,16 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.3.0
+
+- **i18n 国际化**：支持 17 种语言（简体中文、English、العربية、Deutsch、Español、Français、हिन्दी、Italiano、日本語、한국어、Nederlands、Polski、Português、Русский、ไทย、Türkçe、Tiếng Việt）。设置页提供语言下拉选择器，zh/en 固定在顶部，其余按 Unicode 排序。
+- **Windows 余额通知**：余额低于阈值时弹出 Windows toast 通知（默认关闭，可设置阈值）。
+- **Tauri 自动更新**：集成 `tauri-plugin-updater`，支持签名验证的自动更新。
+- **窗口状态记忆**：保存窗口大小和位置，下次启动自动恢复。
+- **Rust 单元测试**：9 个测试覆盖配置模块。
+- **代码拆分**：SettingsPanel 和 ModelDetailPanel 提取为独立组件。
+- **MiMo 查询稳定性**：修复 `api-platform_ph` 缓存过期不被清除的问题，401 重试限制（最多 2 次），`initialization_script` 替代 `on_page_load`。
+
 ### v2.2.1
 
 - **MiMo 查询性能优化**：`initialization_script` 替代 `on_page_load`，hook 在 SPA 脚本运行前注入，detail API 请求被即时拦截，查询速度大幅提升。

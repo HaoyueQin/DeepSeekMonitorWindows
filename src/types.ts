@@ -12,6 +12,8 @@ export type AppConfig = {
   autoRefreshEnabled: boolean;
   autostart: boolean;
   configPath: string;
+  lowBalanceNotify: boolean;
+  lowBalanceThreshold: number;
 };
 
 export type BalanceData = {

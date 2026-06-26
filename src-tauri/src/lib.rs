@@ -180,6 +180,50 @@ fn save_autostart(autostart: bool) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
+fn save_low_balance_notify(enabled: bool) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    config.low_balance_notify = enabled;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_low_balance_threshold(threshold: f64) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    config.low_balance_threshold = threshold;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+/// 余额检查并发送 Windows 通知
+fn check_and_notify_low_balance(_app: &tauri::AppHandle, balance: &BalanceResult) {
+    let config = match config::read_stored_config() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    if !config.low_balance_notify {
+        return;
+    }
+    let threshold = config.low_balance_threshold;
+    if threshold <= 0.0 {
+        return;
+    }
+    let balance_val = match balance.total_balance.parse::<f64>() {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    if balance_val < threshold {
+        let symbol = if balance.currency == "USD" { "$" } else { "¥" };
+        let _ = notify_rust::Notification::new()
+            .summary("DeepSeek / MiMo Monitor")
+            .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, balance.total_balance, symbol, threshold))
+            .appname("DeepSeekMonitor")
+            .show();
+        log::info!("[Notify] 余额不足: {}{} < {}{}", symbol, balance.total_balance, symbol, threshold);
+    }
+}
+
+#[tauri::command]
 fn set_provider(provider: String) -> Result<AppConfig, String> {
     if provider != "deepseek" && provider != "mimo" {
         return Err("无效的 provider，仅支持 deepseek 或 mimo".to_string());
@@ -191,8 +235,10 @@ fn set_provider(provider: String) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-async fn fetch_balance() -> Result<BalanceResult, String> {
-    deepseek::do_fetch_balance().await
+async fn fetch_balance(app: tauri::AppHandle) -> Result<BalanceResult, String> {
+    let result = deepseek::do_fetch_balance().await?;
+    check_and_notify_low_balance(&app, &result);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -227,7 +273,23 @@ async fn fetch_usage(month: u32, year: u32) -> Result<UsageResult, String> {
 
 #[tauri::command]
 async fn fetch_mimo_balance(app: tauri::AppHandle) -> Result<MimoBalanceResult, String> {
-    mimo::do_fetch_mimo_balance(&app).await
+    let result = mimo::do_fetch_mimo_balance(&app).await?;
+    // 检查 MiMo 余额是否低于阈值
+    let config = config::read_stored_config().unwrap_or_default();
+    if config.low_balance_notify && config.low_balance_threshold > 0.0 {
+        if let Ok(val) = result.available_balance.parse::<f64>() {
+            if val < config.low_balance_threshold {
+                let symbol = if result.currency == "USD" { "$" } else { "¥" };
+                let _ = notify_rust::Notification::new()
+                    .summary("DeepSeek / MiMo Monitor")
+                    .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, result.available_balance, symbol, config.low_balance_threshold))
+                    .appname("DeepSeekMonitor")
+                    .show();
+                log::info!("[Notify] MiMo 余额不足: {}{} < {}{}", symbol, result.available_balance, symbol, config.low_balance_threshold);
+            }
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -306,6 +368,8 @@ pub fn run() {
             save_refresh_interval,
             save_auto_refresh_enabled,
             save_autostart,
+            save_low_balance_notify,
+            save_low_balance_threshold,
             set_provider,
             fetch_balance,
             save_usage_token,

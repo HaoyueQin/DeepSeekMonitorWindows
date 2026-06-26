@@ -8,9 +8,11 @@ import {
   Info, KeyRound, Power, RefreshCw, Settings, Shirt, SunMedium, X, Zap,
 } from "lucide-react";
 import "./styles.css";
+initLang();
 
 import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageModel, UsageDay, UsageResult, MimoBalanceData as MimoBalance, MimoUsageModel, MimoUsageDay, MimoUsageResult } from "./types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, recentUsageDays, previousMonth, modelDisplayName, modelIcon } from "./utils";
+import { initLang } from "./i18n";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ModelDetailPanel } from "./components/ModelDetailPanel";
