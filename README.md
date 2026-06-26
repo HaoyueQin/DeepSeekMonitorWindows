@@ -180,6 +180,13 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.1.1
+
+- **MiMo 查询稳定性修复**：修复 `api-platform_ph` 缓存过期后不被清除导致 detail API 持续 401 的问题。fast-path 失败时自动清除旧 ph，让 `initialization_script` hook 重新捕获。
+- **401 重试限制**：detail 提取遇到 401 时最多显示 2 次登录窗口，之后静默降级到概览数据，避免反复弹窗。
+- **Provider 切换修复**：修复从 MiMo 切换到 DeepSeek（或反向）时卡在"查询中"的问题。`setProvider` 现在直接触发数据加载。
+- **轮询超时优化**：detail 提取轮询从 120 秒缩短到 30 秒，减少无效等待。
+
 ### v2.1.0
 
 - **MiMo 查询速度优化**：使用 `initialization_script` 替代 `on_page_load`，hook 在 SPA 脚本运行前注入，detail API 请求被即时拦截，查询速度大幅提升。

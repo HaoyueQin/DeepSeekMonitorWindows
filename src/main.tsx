@@ -52,15 +52,6 @@ function App() {
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = React.useState(60);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
 
-  const setProvider = React.useCallback((next: Provider) => {
-    providerRef.current = next;
-    setProviderState(next);
-    setBalance(null); setBalanceState("loading");
-    setUsage(null); setUsageState("loading");
-    if (next === "mimo") void invoke("ensure_mimo_webview").catch(() => {});
-    void invoke<AppConfig>("set_provider", { provider: next }).catch(() => {});
-  }, []);
-
   const loadBalance = React.useCallback((p?: Provider) => {
     const active = p ?? provider;
     setBalanceState("loading");
@@ -96,6 +87,17 @@ function App() {
   }, [provider]);
 
   const refreshAll = React.useCallback(() => { loadBalance(); loadUsage(); }, [loadBalance, loadUsage]);
+
+  const setProvider = React.useCallback((next: Provider) => {
+    setProviderState(next);
+    setBalance(null); setBalanceState("loading");
+    setUsage(null); setUsageState("loading");
+    if (next === "mimo") void invoke("ensure_mimo_webview").catch(() => {});
+    void invoke<AppConfig>("set_provider", { provider: next }).catch(() => {});
+    loadBalance(next);
+    loadUsage(next);
+  }, [loadBalance, loadUsage]);
+
   const providerRef = React.useRef(provider);
   const initialLoadDone = React.useRef(false);
 

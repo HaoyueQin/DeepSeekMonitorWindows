@@ -1603,8 +1603,20 @@ pub fn run() {
                             return Ok(items);
                         }
                     }
+                    // API 返回了数据但解析失败或为空，检查是否 401
+                    if json.contains("\"code\":401") {
+                        log::warn!("[MiMo] detail fast-path 401, clearing cached ph");
+                        if let Ok(mut config) = read_stored_config() {
+                            config.mimo_ph = None;
+                            let _ = write_stored_config(&config);
+                        }
+                    }
                 } else {
-                    log::warn!("[MiMo] detail fast-path API call failed");
+                    log::warn!("[MiMo] detail fast-path API call failed, clearing cached ph");
+                    if let Ok(mut config) = read_stored_config() {
+                        config.mimo_ph = None;
+                        let _ = write_stored_config(&config);
+                    }
                 }
                 log::info!("[MiMo] detail fast-path failed, falling back to page extraction");
             }
@@ -1630,9 +1642,10 @@ pub fn run() {
         let _ = window.navigate(usage_url);
 
         // 轮询 window.__mimo_detail（hook 在 SPA 发出 detail API 请求时会设置它）
-        // 如果 401，会显示窗口让用户登录，然后继续等待
+        // 如果 401，会显示窗口让用户登录，但限制重试次数避免反复弹窗
         let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_secs(120) {
+        let mut auth_401_count = 0u32;
+        while start.elapsed() < std::time::Duration::from_secs(30) {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
             let req_id = format!("__chk_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
@@ -1670,14 +1683,17 @@ pub fn run() {
                     log::warn!("[MiMo] detail error: {}", data);
                     continue;
                 } else if data.contains("\"code\":401") {
-                    // 401 → 需要登录。显示窗口让用户登录，SPA 会自动重定向到登录页
-                    log::info!("[MiMo] detail: 401 detected, showing login window");
-                    if let Some(w) = app.get_webview_window("mimo-sync") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
+                    auth_401_count += 1;
+                    if auth_401_count <= 2 {
+                        log::info!("[MiMo] detail: 401 detected ({}/2), showing login window", auth_401_count);
+                        if let Some(w) = app.get_webview_window("mimo-sync") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                        let _ = app.emit("mimo-auth-required", ());
+                    } else {
+                        log::info!("[MiMo] detail: 401 persisted after {} retries, giving up detail extraction", auth_401_count);
                     }
-                    let _ = app.emit("mimo-auth-required", ());
-                    // 继续轮询 — 用户登录后 SPA 会重定向回用量页面，hook 会捕获数据
                     continue;
                 } else if !data.is_empty() && !data.starts_with('<') {
                     if let Ok(items) = parse_detail_items(&data) {
