@@ -9,7 +9,7 @@ pub fn run() {
         path::{Path, PathBuf},
         process::Command,
         sync::{
-            atomic::{AtomicBool, AtomicU16, Ordering},
+            atomic::{AtomicBool, Ordering},
             Arc, Mutex,
         },
         thread,
@@ -22,6 +22,45 @@ pub fn run() {
         webview::PageLoadEvent,
         Emitter, Manager, PhysicalPosition, Position, WebviewWindow,
     };
+
+    /// 持久化回调服务器端口包装
+    struct CallbackServerPort(u16);
+
+    /// 持久化 tiny_http 回调服务器，避免每次 API 调用创建新线程
+    struct CallbackServer {
+        port: u16,
+    }
+    impl CallbackServer {
+        fn start(shared_map: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>) -> Self {
+            use tiny_http::{Header, Method, Response, Server};
+            let server = Server::http("127.0.0.1:0").expect("无法启动回调服务器");
+            let port = server.server_addr().to_ip().unwrap().port();
+            std::thread::spawn(move || {
+                while let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_secs(3600)) {
+                    if *request.method() == Method::Options {
+                        let response = Response::from_string(String::new())
+                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
+                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"POST, OPTIONS"[..]).unwrap())
+                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type"[..]).unwrap());
+                        let _ = request.respond(response);
+                    } else {
+                        let mut body = String::new();
+                        let _ = request.as_reader().read_to_string(&mut body);
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
+                            if let (Some(rid), Some(data)) = (parsed.get("reqId").and_then(|v| v.as_str()), parsed.get("data").and_then(|v| v.as_str())) {
+                                let mut map = shared_map.lock().unwrap();
+                                if let Some(tx) = map.remove(rid) { let _ = tx.send(data.to_string()); }
+                            }
+                        }
+                        let response = Response::from_string("OK")
+                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                        let _ = request.respond(response);
+                    }
+                }
+            });
+            CallbackServer { port }
+        }
+    }
 
     /// In-memory cache for MiMo detail extraction results to avoid repeated slow polling.
     /// Also serves as a concurrency guard to prevent multiple simultaneous extractions.
@@ -49,7 +88,7 @@ pub fn run() {
         fn clear_in_progress(&mut self) { self.in_progress = false; }
     }
 
-    #[derive(Debug, Default, Deserialize, Serialize)]
+    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
     struct StoredConfig {
         api_key: Option<String>,
         #[serde(default)]
@@ -101,6 +140,13 @@ pub fn run() {
             serde_json::from_str(&text).map_err(|error| error.to_string())?;
         config.refresh_interval_seconds =
             normalize_refresh_interval_seconds(config.refresh_interval_seconds);
+        // 解密凭据（向后兼容明文）
+        if let Some(ref key) = config.api_key {
+            config.api_key = Some(decrypt_credential(key)?);
+        }
+        if let Some(ref token) = config.usage_token {
+            config.usage_token = Some(decrypt_credential(token)?);
+        }
         Ok(config)
     }
 
@@ -111,30 +157,108 @@ pub fn run() {
         }
     }
 
-    /// Get current date in YYYY-MM-DD format using local time
-    fn chrono_now_date() -> String {
-        let now = std::time::SystemTime::now();
-        let duration = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        let secs = duration.as_secs();
-        // days since epoch
-        let days = (secs / 86400) as i64;
-        // convert to y/m/d (civil calendar from days since epoch)
-        let (y, m, d) = civil_from_days(days);
-        format!("{:04}-{:02}-{:02}", y, m, d)
+    // MiMo SPA 拦截脚本：在页面脚本运行前注入，捕获 api-platform_ph 和 detail 响应
+    const MIMO_INTERCEPT_JS: &str = r#"
+        (function() {
+            if (window.__mimo_hooked) return;
+            window.__mimo_ph = null;
+            window.__mimo_detail = null;
+            var ALLOWED = ['platform.xiaomimimo.com'];
+            function isAllowed(u) { try { return ALLOWED.indexOf(new URL(u, location.href).hostname) !== -1; } catch(e) { return false; } }
+            // 主动扫描 ph
+            function __extractPh() {
+                if (window.__mimo_ph) return window.__mimo_ph;
+                try { var v = localStorage.getItem('mimo_platform_ph'); if (v) { window.__mimo_ph = v; return v; } } catch(e) {}
+                try { var c = document.cookie.match(/(?:api-platform_ph|platform_ph)=([^;]+)/); if (c) { window.__mimo_ph = decodeURIComponent(c[1]); return window.__mimo_ph; } } catch(e) {}
+                try { var h = document.documentElement ? (document.documentElement.innerHTML || '') : ''; var m = h.match(/api-platform_ph[=:]["']?([^'"&\s,}]+)/); if (m) { window.__mimo_ph = decodeURIComponent(m[1]); return window.__mimo_ph; } } catch(e) {}
+                return null;
+            }
+            __extractPh();
+            // Hook fetch
+            var __of = window.fetch;
+            window.fetch = function() {
+                var u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url ? arguments[0].url : '');
+                if (isAllowed(u) && u.indexOf('api-platform_ph=') !== -1) {
+                    var m = u.match(/api-platform_ph=([^&]+)/);
+                    if (m) { window.__mimo_ph = decodeURIComponent(m[1]); try { localStorage.setItem('mimo_platform_ph', window.__mimo_ph); } catch(e) {} }
+                    if (u.indexOf('/usage/detail/list') !== -1) {
+                        return __of.apply(this, arguments).then(function(r) { return r.clone().text().then(function(t) { window.__mimo_detail = t; return r; }).catch(function() { return r; }); });
+                    }
+                }
+                return __of.apply(this, arguments);
+            };
+            // Hook XMLHttpRequest
+            var __oo = XMLHttpRequest.prototype.open;
+            var __os = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(m, u) { this.__mu = u; return __oo.apply(this, arguments); };
+            XMLHttpRequest.prototype.send = function() {
+                var u = this.__mu || '';
+                if (isAllowed(u) && u.indexOf('api-platform_ph=') !== -1) {
+                    var m = u.match(/api-platform_ph=([^&]+)/);
+                    if (m) { window.__mimo_ph = decodeURIComponent(m[1]); try { localStorage.setItem('mimo_platform_ph', window.__mimo_ph); } catch(e) {} }
+                    if (u.indexOf('/usage/detail/list') !== -1) this.addEventListener('load', function() { window.__mimo_detail = this.responseText; });
+                }
+                return __os.apply(this, arguments);
+            };
+            // 定期扫描 ph
+            setInterval(function() { if (!window.__mimo_ph) __extractPh(); }, 1000);
+            window.__mimo_hooked = true;
+        })();
+    "#;
+
+    // ─── DPAPI 凭据加密 ────────────────────────────────────
+    #[repr(C)]
+    struct DataBlob { cb_data: u32, pb_data: *mut u8 }
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        fn CryptProtectData(pdata_in: *const DataBlob, sz_data_descr: *const u16, p_optional_entropy: *const DataBlob, pv_reserved: *mut core::ffi::c_void, p_prompt_struct: *const core::ffi::c_void, dw_flags: u32, pdata_out: *mut DataBlob) -> i32;
+        fn CryptUnprotectData(pdata_in: *const DataBlob, p_sz_data_descr: *mut *mut u16, p_optional_entropy: *const DataBlob, pv_reserved: *mut core::ffi::c_void, p_prompt_struct: *const core::ffi::c_void, dw_flags: u32, pdata_out: *mut DataBlob) -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" { fn LocalFree(h_mem: isize) -> isize; }
+
+    fn dpapi_encrypt(plain: &[u8]) -> Result<Vec<u8>, String> {
+        let data_in = DataBlob { cb_data: plain.len() as u32, pb_data: plain.as_ptr() as *mut u8 };
+        let mut data_out = DataBlob { cb_data: 0, pb_data: std::ptr::null_mut() };
+        let result = unsafe { CryptProtectData(&data_in, std::ptr::null(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null(), 0, &mut data_out) };
+        if result == 0 { return Err("DPAPI 加密失败".to_string()); }
+        let encrypted = unsafe { std::slice::from_raw_parts(data_out.pb_data, data_out.cb_data as usize).to_vec() };
+        unsafe { LocalFree(data_out.pb_data as isize); }
+        Ok(encrypted)
     }
 
-    fn civil_from_days(days: i64) -> (i64, u32, u32) {
-        let z = days + 719468;
-        let era = if z >= 0 { z } else { z - 146096 } / 146097;
-        let doe = (z - era * 146097) as u32;
-        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        let y = yoe as i64 + era * 400;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let d = doy - (153 * mp + 2) / 5 + 1;
-        let m = if mp < 10 { mp + 3 } else { mp - 9 };
-        let y = if m <= 2 { y + 1 } else { y };
-        (y, m, d)
+    fn dpapi_decrypt(encrypted: &[u8]) -> Result<Vec<u8>, String> {
+        let data_in = DataBlob { cb_data: encrypted.len() as u32, pb_data: encrypted.as_ptr() as *mut u8 };
+        let mut data_out = DataBlob { cb_data: 0, pb_data: std::ptr::null_mut() };
+        let result = unsafe { CryptUnprotectData(&data_in, std::ptr::null_mut(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null(), 0, &mut data_out) };
+        if result == 0 { return Err("DPAPI 解密失败，凭据可能由其他 Windows 用户加密".to_string()); }
+        let decrypted = unsafe { std::slice::from_raw_parts(data_out.pb_data, data_out.cb_data as usize).to_vec() };
+        unsafe { LocalFree(data_out.pb_data as isize); }
+        Ok(decrypted)
+    }
+
+    fn hex_encode(data: &[u8]) -> String { data.iter().map(|b| format!("{:02x}", b)).collect() }
+    fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
+        if hex.len() % 2 != 0 { return Err("十六进制编码长度无效".to_string()); }
+        (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| format!("十六进制解码失败：{e}"))).collect()
+    }
+
+    fn encrypt_credential(plain: &str) -> String {
+        match dpapi_encrypt(plain.as_bytes()) {
+            Ok(encrypted) => format!("enc1:{}", hex_encode(&encrypted)),
+            Err(_) => { log::warn!("DPAPI 加密失败，将明文保存凭据"); plain.to_string() }
+        }
+    }
+
+    fn decrypt_credential(stored: &str) -> Result<String, String> {
+        if let Some(hex) = stored.strip_prefix("enc1:") {
+            let encrypted = hex_decode(hex)?;
+            let decrypted = dpapi_decrypt(&encrypted)?;
+            String::from_utf8(decrypted).map_err(|e| format!("解密凭据失败：{e}"))
+        } else {
+            Ok(stored.to_string()) // 向后兼容明文
+        }
     }
 
     fn write_stored_config(config: &StoredConfig) -> Result<(), String> {
@@ -143,7 +267,20 @@ pub fn run() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
 
-        let text = serde_json::to_string_pretty(config).map_err(|error| error.to_string())?;
+        // 加密凭据后写入
+        let mut encrypted_config = config.clone();
+        if let Some(ref key) = config.api_key {
+            encrypted_config.api_key = Some(encrypt_credential(key));
+        }
+        if let Some(ref token) = config.usage_token {
+            encrypted_config.usage_token = Some(encrypt_credential(token));
+        }
+        // mimo_token 也加密
+        if let Some(ref token) = config.mimo_token {
+            encrypted_config.mimo_token = Some(encrypt_credential(token));
+        }
+
+        let text = serde_json::to_string_pretty(&encrypted_config).map_err(|error| error.to_string())?;
         fs::write(path, text).map_err(|error| error.to_string())
     }
 
@@ -236,6 +373,23 @@ pub fn run() {
     #[tauri::command]
     fn hide_main_window(window: WebviewWindow) -> Result<(), String> {
         window.hide().map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    fn resize_window(window: WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+        use tauri::LogicalSize;
+        // 记录调整前的右下角位置
+        let old_pos = window.outer_position().map_err(|e| e.to_string())?;
+        let old_size = window.outer_size().map_err(|e| e.to_string())?;
+        let old_right = old_pos.x + old_size.width as i32;
+        let old_bottom = old_pos.y + old_size.height as i32;
+        // 调整大小
+        window.set_size(LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
+        // 获取新尺寸，计算保持右下角固定所需的新位置
+        let new_size = window.outer_size().map_err(|e| e.to_string())?;
+        let new_x = old_right - new_size.width as i32;
+        let new_y = old_bottom - new_size.height as i32;
+        window.set_position(Position::Physical(PhysicalPosition::new(new_x.max(0), new_y.max(0)))).map_err(|e| e.to_string())
     }
 
     #[tauri::command]
@@ -1008,41 +1162,17 @@ pub fn run() {
             .resizable(true)
             .center()
             .visible(false)
-            // 关键：在每个页面加载时注入 fetch/XHR hook，确保 SPA 的 API 请求被拦截
-            .on_page_load(|window, _payload| {
-                let _ = window.eval(r#"
-                    (function() {
-                        if (window.__mimo_hooked) return;
-                        window.__mimo_ph = null;
-                        window.__mimo_detail = null;
-                        const __of = window.fetch;
-                        window.fetch = function() {
-                            const u = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0]?.url || '');
-                            if (u.includes('api-platform_ph=')) {
-                                const m = u.match(/api-platform_ph=([^&]+)/);
-                                if (m) { window.__mimo_ph = decodeURIComponent(m[1]); try { localStorage.setItem('mimo_platform_ph', window.__mimo_ph); } catch(e) {} }
-                                if (u.includes('/usage/detail/list')) {
-                                    return __of.apply(this, arguments).then(async r => { try { window.__mimo_detail = await r.clone().text(); } catch(e) {} return r; });
-                                }
-                            }
-                            return __of.apply(this, arguments);
-                        };
-                        const __oo = XMLHttpRequest.prototype.open;
-                        const __os = XMLHttpRequest.prototype.send;
-                        XMLHttpRequest.prototype.open = function(m, u) { this.__mu = u; return __oo.apply(this, arguments); };
-                        XMLHttpRequest.prototype.send = function() {
-                            const u = this.__mu || '';
-                            if (u.includes('api-platform_ph=')) {
-                                const m = u.match(/api-platform_ph=([^&]+)/);
-                                if (m) { window.__mimo_ph = decodeURIComponent(m[1]); try { localStorage.setItem('mimo_platform_ph', window.__mimo_ph); } catch(e) {} }
-                                if (u.includes('/usage/detail/list')) this.addEventListener('load', function() { window.__mimo_detail = this.responseText; });
-                            }
-                            return __os.apply(this, arguments);
-                        };
-                        window.__mimo_hooked = true;
-                    })();
-                "#);
+            // 导航白名单：只允许 MiMo 和小米登录域名
+            .on_navigation(|url| {
+                url.host_str().is_some_and(|host|
+                    host == "platform.xiaomimimo.com"
+                    || host == "account.xiaomi.com"
+                    || host == "xiaomimimo.com"
+                )
             })
+            // 关键：用 initialization_script 在页面脚本运行前注入 hook
+            // 这样 SPA 的 fetch/XHR 调用会被拦截，api-platform_ph 会被捕获
+            .initialization_script(MIMO_INTERCEPT_JS)
             .build()
             .map_err(|error| format!("打开 MiMo 页面失败：{error}"))
     }
@@ -1061,13 +1191,14 @@ pub fn run() {
         method: &str,
         timeout_secs: u64,
     ) -> Result<String, String> {
-        use tiny_http::{Header, Method, Response, Server};
-
         // 串行化 webview 访问，防止并发 eval 互相干扰
         let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
         let _lock = lock_guard.lock().await;
 
         let window = ensure_mimo_webview_sync(app)?;
+
+        // 使用持久化回调服务器
+        let cb_port = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
 
         // 生成唯一请求 ID
         let req_id = format!(
@@ -1087,69 +1218,7 @@ pub fn run() {
             map.insert(req_id.clone(), tx);
         }
 
-        // 启动本地 HTTP 服务器线程（接收 JS 回传的数据）
-        let port = Arc::new(AtomicU16::new(0));
-        let port_clone = Arc::clone(&port);
-        let shared_map = {
-            let state =
-                app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
-            Arc::clone(&state)
-        };
-        let _server_thread = std::thread::spawn(move || {
-            let server = match Server::http("127.0.0.1:0") {
-                Ok(s) => s,
-                Err(_) => return,
-            };
-            if let Some(addr) = server.server_addr().to_ip() {
-                port_clone.store(addr.port(), Ordering::SeqCst);
-            } else {
-                return;
-            }
-
-            // 处理 OPTIONS 预检 + POST
-            for _ in 0..2 {
-                if let Ok(mut request) = server.recv() {
-                    if *request.method() == Method::Options {
-                        let response = Response::from_string(String::new())
-                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
-                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"POST, OPTIONS"[..]).unwrap())
-                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type"[..]).unwrap());
-                        let _ = request.respond(response);
-                    } else {
-                        let mut body = String::new();
-                        let _ = request.as_reader().read_to_string(&mut body);
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
-                            if let (Some(rid), Some(data)) = (
-                                parsed.get("reqId").and_then(|v| v.as_str()),
-                                parsed.get("data").and_then(|v| v.as_str()),
-                            ) {
-                                let mut map = shared_map.lock().unwrap();
-                                if let Some(tx) = map.remove(rid) {
-                                    let _ = tx.send(data.to_string());
-                                }
-                            }
-                        }
-                        let response = Response::from_string("OK".to_string())
-                            .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
-                        let _ = request.respond(response);
-                        break;
-                    }
-                }
-            }
-        });
-
-        // 等待服务器启动
-        let start = std::time::Instant::now();
-        let actual_port = loop {
-            let p = port.load(Ordering::SeqCst);
-            if p != 0 { break p; }
-            if start.elapsed() > std::time::Duration::from_secs(5) {
-                return Err("HTTP 服务器启动超时".to_string());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        };
-
-        // 关键改进：用 JS fetch 直接调用 API（不导航 WebView，利用已有 cookie）
+        // 用 JS fetch 直接调用 API（不导航 WebView，利用已有 cookie）
         let api_url = format!("https://platform.xiaomimimo.com{}", path);
         let js = format!(
             r#"(async function() {{
@@ -1177,7 +1246,7 @@ pub fn run() {
             }})()"#,
             url = api_url,
             method = method,
-            port = actual_port,
+            port = cb_port,
             req_id = req_id,
         );
         window.eval(&js).map_err(|e| format!("注入脚本失败：{e}"))?;
@@ -1544,53 +1613,13 @@ pub fn run() {
         // 2. 缓存的 ph 失效或不存在 → 导航到用量页面
         // on_page_load hook（在 ensure_mimo_webview_sync 中注册）会在 SPA 脚本运行前注入
         // SPA 的 detail API 请求会被 hook 拦截，__mimo_detail 和 __mimo_ph 会被设置
-        use tiny_http::{Header, Method, Response, Server};
-
         let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
         let _lock = lock_guard.lock().await;
 
         let window = ensure_mimo_webview_sync(app)?;
 
-        // 启动本地 HTTP 服务器（用于读取 JS 上下文中的值）
-        let poll_port = Arc::new(AtomicU16::new(0));
-        let poll_port_clone = Arc::clone(&poll_port);
-        let poll_map = {
-            let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
-            Arc::clone(&state)
-        };
-        let _poll_server = std::thread::spawn(move || {
-            let server = match Server::http("127.0.0.1:0") { Ok(s) => s, Err(_) => return };
-            if let Some(addr) = server.server_addr().to_ip() { poll_port_clone.store(addr.port(), Ordering::SeqCst); } else { return; }
-            while let Ok(Some(mut request)) = server.recv_timeout(std::time::Duration::from_secs(20)) {
-                if *request.method() == Method::Options {
-                    let response = Response::from_string(String::new())
-                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
-                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"POST, OPTIONS"[..]).unwrap())
-                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type"[..]).unwrap());
-                    let _ = request.respond(response);
-                } else {
-                    let mut body = String::new();
-                    let _ = request.as_reader().read_to_string(&mut body);
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
-                        if let (Some(rid), Some(data)) = (parsed.get("reqId").and_then(|v| v.as_str()), parsed.get("data").and_then(|v| v.as_str())) {
-                            let mut map = poll_map.lock().unwrap();
-                            if let Some(tx) = map.remove(rid) { let _ = tx.send(data.to_string()); }
-                        }
-                    }
-                    let response = Response::from_string("OK")
-                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
-                    let _ = request.respond(response);
-                }
-            }
-        });
-
-        let server_start = std::time::Instant::now();
-        let poll_port_val = loop {
-            let p = poll_port.load(Ordering::SeqCst);
-            if p != 0 { break p; }
-            if server_start.elapsed() > std::time::Duration::from_secs(3) { return Err("HTTP 服务器启动超时".to_string()); }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        };
+        // 使用持久化回调服务器
+        let poll_port_val = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
 
         // 导航到用量页面（on_page_load hook 会自动注入）
         log::info!("[MiMo] detail: navigating to usage page (on_page_load hook active)");
@@ -1749,14 +1778,21 @@ pub fn run() {
             }
         }))
         .manage(Arc::new(AtomicBool::new(false)))
-        .manage(Arc::new(Mutex::new(HashMap::<
-            String,
-            oneshot::Sender<String>,
-        >::new())))
+        .manage({
+            // 共享的 oneshot 通道 map，CallbackServer 和命令都用这一个
+            let shared_map = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<String>>::new()));
+            shared_map
+        })
         .manage(Arc::new(tokio::sync::Mutex::new(())))
         .manage(Mutex::new(MimoDetailCache::new()))
+        .manage({
+            // 持久化回调服务器，复用 Tauri state 中的 shared_map
+            // 注意：setup 中再获取 shared_map 的引用来启动 CallbackServer
+            Mutex::new(CallbackServerPort(0))
+        })
         .invoke_handler(tauri::generate_handler![
             hide_main_window,
+            resize_window,
             get_app_config,
             save_api_key,
             clear_api_key,
@@ -1784,6 +1820,13 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // 启动持久化回调服务器
+            let shared_map = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>().inner().clone();
+            let cb_server = CallbackServer::start(shared_map);
+            *app.state::<Mutex<CallbackServerPort>>().lock().unwrap() = CallbackServerPort(cb_server.port);
+            // 防止 server 被 drop（drop 会关闭监听线程）
+            app.manage(Mutex::new(cb_server));
 
             let show_item = MenuItem::with_id(app, "show", "显示主面板", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;

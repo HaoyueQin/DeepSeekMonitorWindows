@@ -180,6 +180,18 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.1.0
+
+- **MiMo 查询速度优化**：使用 `initialization_script` 替代 `on_page_load`，hook 在 SPA 脚本运行前注入，detail API 请求被即时拦截，查询速度大幅提升。
+- **DPAPI 凭据加密**：API Key、Usage Token 等敏感凭据使用 Windows DPAPI 加密存储（`enc1:` 前缀），向后兼容明文。
+- **持久化回调服务器**：tiny_http 回调服务器启动时创建一次，所有 API 调用复用同一端口，消除每次调用的线程创建开销。
+- **窗口可拉伸**：支持拖拽窗口边缘自由调整大小（min 340×500，max 700×1200），设置中提供 4 个预设尺寸。
+- **窗口大小锚定**：调整窗口大小时保持右下角位置固定。
+- **离线数据缓存**：余额和用量数据自动缓存到 localStorage，API 失败时自动加载缓存数据。
+- **安全加固**：CSP 强制执行、`withGlobalTauri: false`、注入脚本域名白名单、MiMo 窗口导航白名单、输入长度验证。
+- **代码架构改进**：拆分 types.ts、utils.ts、DashboardPanel.tsx 模块；配置 Vitest 单元测试框架（16 个测试）。
+- **MiMo 查询稳定性**：修复 CallbackServer 状态注册导致的 panic、detail API 401 循环弹窗等问题。
+
 ### v2.0.0
 
 - **MiMo 平台完整支持**：MiMo 从 Beta 升级为正式支持，用量明细、每日趋势图、缓存命中明细全部打通。
