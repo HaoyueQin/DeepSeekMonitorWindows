@@ -207,12 +207,23 @@ fn save_theme(theme: String) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-fn save_currency_unit(unit: String) -> Result<AppConfig, String> {
-    if !["cny", "usd", "cny_mt"].contains(&unit.as_str()) {
-        return Err("无效货币单位".to_string());
+fn save_currency(currency: String) -> Result<AppConfig, String> {
+    if !["cny", "usd"].contains(&currency.as_str()) {
+        return Err("无效货币".to_string());
     }
     let mut config = config::read_stored_config()?;
-    config.currency_unit = unit;
+    config.currency = currency;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_efficiency_unit(unit: String) -> Result<AppConfig, String> {
+    if !["token_per_currency", "currency_per_token"].contains(&unit.as_str()) {
+        return Err("无效效率单位".to_string());
+    }
+    let mut config = config::read_stored_config()?;
+    config.efficiency_unit = unit;
     config::write_stored_config(&config)?;
     config::to_app_config(config)
 }
@@ -439,7 +450,8 @@ pub fn run() {
             save_low_balance_notify,
             save_low_balance_threshold,
             save_theme,
-            save_currency_unit,
+            save_currency,
+            save_efficiency_unit,
             set_provider,
             fetch_balance,
             save_usage_token,

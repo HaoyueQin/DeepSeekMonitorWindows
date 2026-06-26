@@ -5,13 +5,15 @@ import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult,
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon } from "../utils";
 
 // ─── BalanceCard ───────────────────────────────────────────
-export function BalanceCard({ balance, state, error, todayCost, monthCost, provider }: {
+export function BalanceCard({ balance, state, error, todayCost, monthCost, provider, currency, exchangeRate }: {
   balance: BalanceData | MimoBalanceData | null;
   state: BalanceState;
   error: string;
   todayCost: number | null;
   monthCost: number | null;
   provider: Provider;
+  currency?: "cny" | "usd";
+  exchangeRate?: number;
 }) {
   const isDeepSeek = provider === "deepseek";
   const dsBalance = isDeepSeek ? (balance as BalanceData | null) : null;
@@ -40,11 +42,11 @@ export function BalanceCard({ balance, state, error, todayCost, monthCost, provi
       <div className="metric-grid">
         <div className="mini-card">
           <div className="caption-with-icon orange"><SunMedium size={15} /><span>当日消耗</span></div>
-          <strong>{todayCost != null ? fmtMoney(todayCost) : "—"}</strong>
+          <strong>{todayCost != null ? fmtMoney(todayCost, currency, exchangeRate) : "—"}</strong>
         </div>
         <div className="mini-card">
           <div className="caption-with-icon orange"><CalendarDays size={15} /><span>本月消费</span></div>
-          <strong>{monthCost != null ? fmtMoney(monthCost) : "—"}</strong>
+          <strong>{monthCost != null ? fmtMoney(monthCost, currency, exchangeRate) : "—"}</strong>
         </div>
       </div>
     </article>
@@ -52,13 +54,15 @@ export function BalanceCard({ balance, state, error, todayCost, monthCost, provi
 }
 
 // ─── UsageRow ──────────────────────────────────────────────
-export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDisplay }: {
+export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDisplay, currency, exchangeRate }: {
   modelKey: string;
   data: UsageModel | null;
   maxTokens: number;
   state: BalanceState;
   onClick: () => void;
   modelDisplay?: string;
+  currency?: "cny" | "usd";
+  exchangeRate?: number;
 }) {
   const isFlash = modelKey === "flash";
   const name = modelDisplay ?? (isFlash ? "V4 Flash" : "V4 Pro");
@@ -66,8 +70,10 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
     : state === "loading" ? "查询中…"
     : state === "nokey" ? "未配置 Token"
     : state === "error" ? "用量不可用" : "—";
-  const cost = data ? fmtMoney(data.cost) : "—";
-  const ratio = data && data.cost > 0 ? `${(data.cost * 1_000_000 / data.totalTokens).toFixed(3)} ¥/MT` : "—";
+  const cost = data ? fmtMoney(data.cost, currency, exchangeRate) : "—";
+  const sym = currency === "usd" ? "$" : "¥";
+  const displayCost = currency === "usd" && exchangeRate && exchangeRate > 0 ? data ? data.cost / exchangeRate : 0 : data ? data.cost : 0;
+  const ratio = data && data.cost > 0 ? `${(displayCost * 1_000_000 / data.totalTokens).toFixed(3)} ${sym}/MT` : "—";
   const width = data ? `${Math.max(2, (data.totalTokens / maxTokens) * 100)}%` : "0%";
 
   return (
@@ -196,7 +202,7 @@ export function UsageChart({ usage, state, error, provider }: {
 }
 
 // ─── DashboardPanel ────────────────────────────────────────
-export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail }: {
+export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate }: {
   provider: Provider;
   onProviderChange: (p: Provider) => void;
   balance: BalanceData | MimoBalanceData | null;
@@ -209,6 +215,8 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   onClose: () => void;
   onSettings: () => void;
   onDetail: (model: string) => void;
+  currency: "cny" | "usd";
+  exchangeRate: number;
 }) {
   const [theme, setTheme] = React.useState<string>(() => localStorage.getItem("ui-theme") || "light");
   const toggleTheme = () => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); localStorage.setItem("ui-theme", next); document.documentElement.setAttribute("data-theme", next); };
@@ -246,15 +254,15 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
           <button aria-label="关闭" onClick={onClose}><X size={25} /></button>
         </div>
       </header>
-      <BalanceCard balance={balance} state={balanceState} error={balanceError} todayCost={todayCost} monthCost={monthCost} provider={provider} />
+      <BalanceCard balance={balance} state={balanceState} error={balanceError} todayCost={todayCost} monthCost={monthCost} provider={provider} currency={currency} exchangeRate={exchangeRate} />
       <div className="usage-stack">
         {isDeepSeek ? (
           <>
-            <UsageRow modelKey="flash" data={flash ? { ...flash, key: "flash" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("flash")} />
-            <UsageRow modelKey="pro" data={pro ? { ...pro, key: "pro" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("pro")} />
+            <UsageRow modelKey="flash" data={flash ? { ...flash, key: "flash" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("flash")} currency={currency} exchangeRate={exchangeRate} />
+            <UsageRow modelKey="pro" data={pro ? { ...pro, key: "pro" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("pro")} currency={currency} exchangeRate={exchangeRate} />
           </>
         ) : topModels.map((m) => (
-          <UsageRow key={m.key} modelKey={modelIcon(m.key)} data={{ ...m, key: modelIcon(m.key) }} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(m.key)} modelDisplay={modelDisplayName(m.key)} />
+          <UsageRow key={m.key} modelKey={modelIcon(m.key)} data={{ ...m, key: modelIcon(m.key) }} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(m.key)} modelDisplay={modelDisplayName(m.key)} currency={currency} exchangeRate={exchangeRate} />
         ))}
       </div>
       <UsageChart usage={usage} state={usageState} error={usageError} provider={provider} />

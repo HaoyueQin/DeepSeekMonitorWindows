@@ -378,7 +378,8 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, String> {
         low_balance_notify: config.low_balance_notify,
         low_balance_threshold: config.low_balance_threshold,
         theme: config.theme,
-        currency_unit: config.currency_unit,
+        currency: config.currency,
+        efficiency_unit: config.efficiency_unit,
     })
 }
 

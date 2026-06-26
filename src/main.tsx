@@ -52,6 +52,8 @@ function App() {
   const [usageError, setUsageError] = React.useState("");
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = React.useState(60);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
+  const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
+  const [exchangeRate, setExchangeRate] = React.useState<number>(7.25);
 
   const loadBalance = React.useCallback((p?: Provider) => {
     const active = p ?? provider;
@@ -114,6 +116,28 @@ function App() {
           if (config.provider !== providerRef.current) { setBalance(null); setBalanceState("loading"); setUsage(null); setUsageState("loading"); }
           providerRef.current = config.provider; setProviderState(config.provider);
           setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60); setAutoRefreshEnabled(config.autoRefreshEnabled);
+          setCurrency(config.currency || "cny");
+          // Fetch exchange rate with localStorage cache (24h TTL)
+          const cached = localStorage.getItem("dsm-exrate-v2");
+          if (cached) {
+            try {
+              const { rate, ts } = JSON.parse(cached);
+              if (Date.now() - ts < 24 * 3600 * 1000 && rate > 0) { setExchangeRate(rate); }
+              else { throw new Error("invalid or expired"); }
+            } catch { localStorage.removeItem("dsm-exrate-v2"); }
+          }
+          if (!localStorage.getItem("dsm-exrate-v2")) {
+            void fetch("https://open.er-api.com/v6/latest/CNY")
+              .then(r => r.json())
+              .then(data => {
+                if (data?.rates?.USD) {
+                  const rate = data.rates.USD; // e.g. 7.25 CNY per 1 USD
+                  setExchangeRate(rate);
+                  localStorage.setItem("dsm-exrate-v2", JSON.stringify({ rate, ts: Date.now() }));
+                }
+              })
+              .catch(() => { /* keep default 7.25 */ });
+          }
           loadBalance(config.provider); loadUsage(config.provider);
         }
       })
@@ -146,6 +170,8 @@ function App() {
           onRefresh={refreshAll} onClose={hideWindow}
           onSettings={() => setView("settings")}
           onDetail={(nextModel) => { setModel(nextModel); setView("detail"); }}
+          currency={currency}
+          exchangeRate={exchangeRate}
         />
       )}
       {view === "settings" && (
@@ -154,10 +180,11 @@ function App() {
           onUsageLoaded={(nextUsage) => { setUsage(nextUsage); setUsageState("ok"); }}
           onUsageCleared={() => { setUsage(null); setUsageState("loading"); }}
           onRefreshIntervalChanged={setRefreshIntervalSeconds} onAutoRefreshChanged={setAutoRefreshEnabled}
+          onCurrencyChanged={setCurrency}
         />
       )}
       {view === "detail" && (
-        <ModelDetailPanel model={model} usage={usage} usageState={usageState} onBack={() => setView("dashboard")} provider={provider} />
+        <ModelDetailPanel model={model} usage={usage} usageState={usageState} onBack={() => setView("dashboard")} provider={provider} currency={currency} exchangeRate={exchangeRate} />
       )}
     </div>
   );

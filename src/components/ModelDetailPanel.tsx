@@ -4,9 +4,11 @@ import type { ModelName, BalanceState, UsageResult, MimoUsageResult, Provider } 
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, addDays, dateKey, modelDisplayName, modelIcon } from "../utils";
 
 // ─── ModelDetailPanel ──────────────────────────────────────
-export function ModelDetailPanel({ model, usage, usageState, onBack, provider }: {
+export function ModelDetailPanel({ model, usage, usageState, onBack, provider, currency, exchangeRate }: {
   model: ModelName; usage: UsageResult | MimoUsageResult | null;
   usageState: BalanceState; onBack: () => void; provider: Provider;
+  currency?: "cny" | "usd";
+  exchangeRate?: number;
 }) {
   const isDeepSeek = provider === "deepseek";
   const isFlash = model === "flash";
@@ -18,13 +20,13 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider }:
     const data = dsUsage?.models.find((i) => i.key === model) ?? null;
     title = isFlash ? "V4 Flash" : "V4 Pro";
     tintClass = isFlash ? "flash" : "pro";
-    cost = data ? fmtMoney(data.cost) : "—";
+    cost = data ? fmtMoney(data.cost, currency, exchangeRate) : "—";
     totalText = data ? fmtTokensShort(data.totalTokens) : "—";
   } else {
     title = modelDisplayName(model);
     tintClass = modelIcon(model);
     const md = mimoUsage?.models.find((m) => m.key === model);
-    cost = md ? fmtMoney(md.cost) : "—";
+    cost = md ? fmtMoney(md.cost, currency, exchangeRate) : "—";
     totalText = md ? fmtTokensShort(md.totalTokens) : "—";
   }
 

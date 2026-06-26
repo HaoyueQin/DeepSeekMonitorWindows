@@ -35,12 +35,15 @@ pub struct StoredConfig {
     pub low_balance_threshold: f64,
     #[serde(default = "default_theme")]
     pub theme: String,
-    #[serde(default = "default_currency_unit")]
-    pub currency_unit: String,
+    #[serde(default = "default_currency")]
+    pub currency: String, // "cny" | "usd"
+    #[serde(default = "default_efficiency_unit")]
+    pub efficiency_unit: String, // "token_per_currency" | "currency_per_token"
 }
 
 fn default_theme() -> String { "light".to_string() }
-fn default_currency_unit() -> String { "cny".to_string() }
+fn default_currency() -> String { "cny".to_string() }
+fn default_efficiency_unit() -> String { "token_per_currency".to_string() }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,8 +63,10 @@ pub struct AppConfig {
     pub low_balance_threshold: f64,
     #[serde(default = "default_theme")]
     pub theme: String,
-    #[serde(default = "default_currency_unit")]
-    pub currency_unit: String,
+    #[serde(default = "default_currency")]
+    pub currency: String,
+    #[serde(default = "default_efficiency_unit")]
+    pub efficiency_unit: String,
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────

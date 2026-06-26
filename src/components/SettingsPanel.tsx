@@ -18,10 +18,11 @@ const refreshOptions = [
 ];
 
 // ─── SettingsPanel ─────────────────────────────────────────
-export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged }: {
+export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged }: {
   provider: Provider; onProviderChange: (p: Provider) => void; onBack: () => void;
   onUsageLoaded: (usage: UsageResult | MimoUsageResult) => void; onUsageCleared: () => void;
   onRefreshIntervalChanged: (seconds: number) => void; onAutoRefreshChanged: (enabled: boolean) => void;
+  onCurrencyChanged: (currency: "cny" | "usd") => void;
 }) {
   const [apiKey, setApiKey] = React.useState("");
   const [config, setConfig] = React.useState<AppConfig | null>(null);
@@ -47,11 +48,12 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [downloadDone, setDownloadDone] = React.useState(false);
   const [activeCategory, setActiveCategory] = React.useState<string | null>(null);
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("light");
-  const [currencyUnit, setCurrencyUnit] = React.useState<"cny" | "usd" | "cny_mt">("cny");
+  const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
+  const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("token_per_currency");
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   React.useEffect(() => {
-    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrencyUnit(c.currencyUnit || "cny"); }).catch(() => setStatus("浏览器预览模式"));
+    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); }).catch(() => setStatus("浏览器预览模式"));
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
@@ -110,10 +112,16 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     void invoke<AppConfig>("save_theme", { theme: val }).then((c) => { setConfig(c); }).catch(() => setTheme(prev));
   }, [theme]);
 
-  const saveCurrencyUnit = React.useCallback((val: "cny" | "usd" | "cny_mt") => {
-    const prev = currencyUnit; setCurrencyUnit(val);
-    void invoke<AppConfig>("save_currency_unit", { unit: val }).then((c) => { setConfig(c); }).catch(() => setCurrencyUnit(prev));
-  }, [currencyUnit]);
+  const saveCurrency = React.useCallback((val: "cny" | "usd") => {
+    const prev = currency; setCurrency(val);
+    onCurrencyChanged(val);
+    void invoke<AppConfig>("save_currency", { currency: val }).then((c) => { setConfig(c); }).catch(() => { setCurrency(prev); onCurrencyChanged(prev); });
+  }, [currency, onCurrencyChanged]);
+
+  const saveEfficiencyUnit = React.useCallback((val: "token_per_currency" | "currency_per_token") => {
+    const prev = efficiencyUnit; setEfficiencyUnit(val);
+    void invoke<AppConfig>("save_efficiency_unit", { unit: val }).then((c) => { setConfig(c); }).catch(() => setEfficiencyUnit(prev));
+  }, [efficiencyUnit]);
 
   // Apply theme on mount and when theme changes
   React.useEffect(() => {
@@ -307,13 +315,22 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const displayContent = (
     <>
       <SettingsSection icon={<Palette size={15} />} title={t('settings.currency')}>
-        <p>选择金额显示的货币单位。</p>
+        <p>选择金额显示的货币。</p>
         <div className="segmented">
-          {(["cny", "usd", "cny_mt"] as const).map((opt) => (
-            <button key={opt} className={currencyUnit === opt ? "selected" : ""} onClick={() => saveCurrencyUnit(opt)}>
-              {opt === "cny" ? t('settings.currency_cny') : opt === "usd" ? t('settings.currency_usd') : t('settings.currency_mt')}
+          {(["cny", "usd"] as const).map((opt) => (
+            <button key={opt} className={currency === opt ? "selected" : ""} onClick={() => saveCurrency(opt)}>
+              {opt === "cny" ? t('settings.currency_cny') : t('settings.currency_usd')}
             </button>
           ))}
+        </div>
+        <p style={{ marginTop: 12 }}>效率指标显示方式：</p>
+        <div className="segmented">
+          <button className={efficiencyUnit === "token_per_currency" ? "selected" : ""} onClick={() => saveEfficiencyUnit("token_per_currency")}>
+            {currency === "usd" ? "MT/$" : "MT/¥"}
+          </button>
+          <button className={efficiencyUnit === "currency_per_token" ? "selected" : ""} onClick={() => saveEfficiencyUnit("currency_per_token")}>
+            {currency === "usd" ? "$/MT" : "¥/MT"}
+          </button>
         </div>
       </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.window_size')}>
@@ -336,7 +353,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         <div className="key-row" style={{ marginTop: 8 }}>
           <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginRight: 8 }}>{t('notify.threshold')}：</span>
           <input type="number" min="0" step="0.01" value={lowBalanceThreshold} onChange={(e) => saveLowBalanceThreshold(e.target.value)} style={{ width: 100 }} />
-          <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginLeft: 4 }}>{currencyUnit === "usd" ? "$" : "¥"}</span>
+          <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginLeft: 4 }}>{currency === "usd" ? "$" : "¥"}</span>
         </div>
       )}
     </SettingsSection>
@@ -397,44 +414,44 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       <button className="floating-close settings-close" onClick={onBack} aria-label="返回主面板"><X size={20} /></button>
       <div className="settings-inner">
         <header className="settings-header" data-tauri-drag-region>
-          {activeCategory ? (
-            <button className="provider-toggle" onClick={() => setActiveCategory(null)} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <ChevronLeft size={14} />{t('settings.title')}
-            </button>
-          ) : (
-            <button className="provider-toggle" onClick={() => onProviderChange(provider === "deepseek" ? "mimo" : "deepseek")}>{provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}</button>
-          )}
-          <div><p>{activeCategory ? categories.find(c => c.key === activeCategory)?.label : t('settings.title')}</p></div>
+          <button className="provider-toggle" onClick={() => onProviderChange(provider === "deepseek" ? "mimo" : "deepseek")}>{provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}</button>
+          <div><p>{t('settings.title')}</p></div>
         </header>
 
-        {!activeCategory ? (
-          // Category list
-          <div style={{ padding: '8px 0' }}>
-            {categories.map((cat) => (
+        <div style={{ padding: '8px 0' }}>
+          {categories.map((cat) => (
+            <React.Fragment key={cat.key}>
               <button
-                key={cat.key}
-                onClick={() => setActiveCategory(cat.key)}
+                onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   width: '100%', padding: '12px 16px', border: 'none',
-                  background: 'transparent', color: 'var(--text)', cursor: 'pointer',
+                  background: activeCategory === cat.key ? 'rgba(var(--fg), 0.06)' : 'transparent',
+                  color: 'var(--text)', cursor: 'pointer',
                   fontSize: '0.9em', borderRadius: 8, transition: 'background 0.15s',
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(var(--fg), 0.06)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                onMouseEnter={(e) => { if (activeCategory !== cat.key) e.currentTarget.style.background = 'rgba(var(--fg), 0.04)'; }}
+                onMouseLeave={(e) => { if (activeCategory !== cat.key) e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {cat.icon}
                   <span>{cat.label}</span>
                 </span>
-                <ChevronRight size={14} style={{ opacity: 0.4 }} />
+                <ChevronRight size={14} style={{ opacity: 0.4, transform: activeCategory === cat.key ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
               </button>
-            ))}
-          </div>
-        ) : (
-          // Category detail
-          categoryContent[activeCategory]
-        )}
+              <div style={{
+                display: 'grid',
+                gridTemplateRows: activeCategory === cat.key ? '1fr' : '0fr',
+                transition: 'grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                paddingLeft: 8, paddingRight: 8,
+              }}>
+                <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                  {categoryContent[cat.key]}
+                </div>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
       </div>
     </section>
   );

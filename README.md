@@ -180,6 +180,24 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.4.0
+
+- **设置页面重构**：从平铺式改为手风琴展开式分类导航（账户、通用、显示、通知、关于），CSS Grid 动画流畅过渡。
+- **货币单位设置**：支持人民币(¥) / 美元($) 切换，实时汇率转换（`open.er-api.com`，24h 缓存）。
+- **效率指标**：统一使用 MT 单位（MT/¥ 或 ¥/MT，美元时自动切换为 MT/$ 或 $/MT）。
+- **主题设置**：浅色 / 深色 / 跟随系统，实时切换，支持系统偏好监听。
+- **新 Rust 命令**：`save_currency`、`save_efficiency_unit`、`save_theme`。
+- **货币 prop 贯穿全链路**：main.tsx → DashboardPanel → BalanceCard/UsageRow，ModelDetailPanel。
+
+### v2.3.4
+
+- **安全加固**：修复 `method` 参数 JS 注入、poll server CORS `*` → `null`、`mimo_ph` DPAPI 加密。
+- **代码质量**：删除孤立 `config_tests.rs`、修复 `Cargo.toml` 版本号、修复未使用变量警告。
+
+### v2.3.3
+
+- **安全加固**：`loginUrl` 和 `ph` JS 注入修复（`serde_json::to_string`）、`login-sync` WebView `on_navigation` 守卫、DPAPI `encrypt_credential` 返回 `Result`。
+
 ### v2.3.0
 
 - **i18n 国际化**：支持 17 种语言（简体中文、English、العربية、Deutsch、Español、Français、हिन्दी、Italiano、日本語、한국어、Nederlands、Polski、Português、Русский、ไทย、Türkçe、Tiếng Việt）。设置页提供语言下拉选择器，zh/en 固定在顶部，其余按 Unicode 排序。

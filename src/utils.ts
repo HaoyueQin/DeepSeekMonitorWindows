@@ -9,7 +9,12 @@ export const fmtTokensShort = (n: number) => {
   return String(Math.round(n));
 };
 
-export const fmtMoney = (n: number) => "¥" + n.toFixed(2);
+export const fmtMoney = (n: number, currency?: string, rate?: number) => {
+  if (currency === "usd" && rate && rate > 0) {
+    return "$" + (n * rate).toFixed(2);
+  }
+  return "¥" + n.toFixed(2);
+};
 
 export const mmdd = (date: string) => {
   const parts = date.split("-");
