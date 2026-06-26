@@ -66,3 +66,6 @@ document.title'
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# ---------- AI agent ----------
+.reasonix/

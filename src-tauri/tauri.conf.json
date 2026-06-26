@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DeepSeekMonitorWindows",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "identifier": "com.deepseek.monitor.windows",
   "build": {
     "frontendDist": "../dist",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "DeepSeek Monitor Windows",
+        "title": "DeepSeek / MiMo Monitor",
         "width": 463,
         "height": 660,
         "resizable": false,

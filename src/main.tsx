@@ -96,7 +96,7 @@ type MimoUsageDay = {
   date: string;
   totalTokens: number;
   totalCost: number;
-  models: Array<{ key: string; totalTokens: number; totalCost: number; }>;
+  models: Array<{ key: string; totalTokens: number; cacheHitTokens: number; cacheMissTokens: number; responseTokens: number; totalCost: number; }>;
 };
 
 type MimoUsageResult = {
@@ -335,6 +335,19 @@ function App() {
     return () => window.clearInterval(timer);
   }, [autoRefreshEnabled, refreshAll, refreshIntervalSeconds]);
 
+  // Listen for MiMo auth-required event from backend
+  React.useEffect(() => {
+    const unlistenPromise = listen("mimo-auth-required", () => {
+      setUsageState("error");
+      setUsageError("MiMo 未登录，请在设置中重新登录小米账号");
+      setBalanceState("error");
+      setBalanceError("MiMo 未登录");
+    });
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, []);
+
   const hideWindow = React.useCallback(() => {
     void invoke("hide_main_window").catch(() => {
       // Browser preview has no Tauri IPC. Keep it non-blocking for visual checks.
@@ -457,7 +470,10 @@ function DashboardPanel({
     1,
   );
   const today = dsUsage?.days.find((day) => day.date === todayStr()) ?? null;
-  const todayCost = usageState === "ok" && today ? today.totalCost : (mimoUsage ? null : null);
+  const mimoToday = mimoUsage?.days.find((day) => day.date === todayStr()) ?? null;
+  const todayCost = usageState === "ok"
+    ? (today ? today.totalCost : mimoToday ? mimoToday.totalCost : null)
+    : null;
   const monthCost = usageState === "ok" && usage ? usage.monthCost : null;
 
   const mimoDefaultModels: MimoUsageModel[] = [
@@ -686,32 +702,51 @@ function UsageChart({
   provider: Provider;
 }) {
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
+  const [weekOffset, setWeekOffset] = React.useState(0); // 0=本周, -1=上周, ...
   const MIN_BAR = 3;
+  const DAYS_PER_WEEK = 7;
 
   const isDeepSeek = provider === "deepseek";
   const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
   const mimoUsage = !isDeepSeek ? (usage as MimoUsageResult | null) : null;
 
-  const days = isDeepSeek
-    ? recentUsageDays(dsUsage?.days ?? [])
-    : (mimoUsage?.days ?? []);
-  const points = isDeepSeek
-    ? days.map((day) => {
-        const d = day as UsageDay;
-        const hit = d.flashCacheHit + d.proCacheHit;
-        const miss = d.flashCacheMiss + d.proCacheMiss;
-        const response = d.flashResponse + d.proResponse;
-        return { date: d.date, hit, miss, response, total: hit + miss + response };
-      })
-    : days.map((day) => {
-        const d = day as MimoUsageDay;
-        return { date: d.date, hit: 0, miss: 0, response: d.totalTokens, total: d.totalTokens };
-      });
-  const maxVal = Math.max(...points.map((point) => point.total), 1);
-  const sumHit = points.reduce((sum, point) => sum + point.hit, 0);
-  const sumMiss = points.reduce((sum, point) => sum + point.miss, 0);
-  const sumTotal = points.reduce((sum, point) => sum + point.total, 0);
+  // 统一的 7 天窗口生成（DeepSeek 和 MiMo 共用）
+  const today = new Date();
+  const weekStart = addDays(today, weekOffset * DAYS_PER_WEEK - DAYS_PER_WEEK + 1);
+  const days = Array.from({ length: DAYS_PER_WEEK }, (_, i) => dateKey(addDays(weekStart, i)));
+
+  // 将原始数据按日期索引
+  const dsMap = new Map((dsUsage?.days ?? []).map((d) => [d.date, d]));
+  const mimoMap = new Map((mimoUsage?.days ?? []).map((d) => [d.date, d]));
+
+  const points = days.map((date) => {
+    if (isDeepSeek) {
+      const d = dsMap.get(date);
+      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0 };
+      const hit = d.flashCacheHit + d.proCacheHit;
+      const miss = d.flashCacheMiss + d.proCacheMiss;
+      const response = d.flashResponse + d.proResponse;
+      return { date, hit, miss, response, total: hit + miss + response };
+    } else {
+      const d = mimoMap.get(date);
+      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0 };
+      const hit = d.models.reduce((s, m) => s + m.cacheHitTokens, 0);
+      const miss = d.models.reduce((s, m) => s + m.cacheMissTokens, 0);
+      const response = d.models.reduce((s, m) => s + m.responseTokens, 0);
+      return { date, hit, miss, response, total: hit + miss + response };
+    }
+  });
+
+  const maxVal = Math.max(...points.map((p) => p.total), 1);
+  const sumHit = points.reduce((s, p) => s + p.hit, 0);
+  const sumMiss = points.reduce((s, p) => s + p.miss, 0);
+  const sumTotal = points.reduce((s, p) => s + p.total, 0);
   const hitRate = sumHit + sumMiss > 0 ? ((sumHit / (sumHit + sumMiss)) * 100).toFixed(3) : "0";
+
+  const canGoBack = true; // 总是可以往前翻
+  const canGoForward = weekOffset < 0;
+  const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
+
   const placeholder =
     state === "loading"
       ? "查询中…"
@@ -728,6 +763,15 @@ function UsageChart({
           <BarChart3 size={16} className="brand-blue" />
           <span>缓存命中明细</span>
         </div>
+        <div className="chart-nav">
+          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} title="上一周">
+            ‹
+          </button>
+          <span className="chart-nav-label">{weekLabel}</span>
+          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">
+            ›
+          </button>
+        </div>
         <span className="chart-total">
           {state === "ok" ? `命中率 ${hitRate}% · 合计 ${fmtTokensShort(sumTotal)}` : "—"}
         </span>
@@ -736,8 +780,12 @@ function UsageChart({
         <>
           <div className="bars" onMouseLeave={() => setHoveredIdx(null)}>
             {points.map((point, idx) => (
-              <div className="bar-column" key={point.date}>
-                {hoveredIdx === idx && point.total > 0 && (
+              <div
+                className="bar-column"
+                key={point.date}
+                onMouseEnter={() => setHoveredIdx(idx)}
+              >
+                {hoveredIdx === idx && (
                   <div
                     className={`bar-tooltip${
                       idx <= 1 ? " align-left" : idx >= points.length - 2 ? " align-right" : ""
@@ -747,22 +795,18 @@ function UsageChart({
                       <span className="bar-tooltip-date">{point.date}</span>
                       <strong>{fmtInt(point.total)} tokens</strong>
                     </div>
-                    {isDeepSeek && (
-                      <>
-                        <span className="bar-tooltip-row">
-                          <i className="dot hit" />输入（命中缓存）
-                          <strong>{fmtInt(point.hit)} tokens</strong>
-                        </span>
-                        <span className="bar-tooltip-row">
-                          <i className="dot miss" />输入（未命中缓存）
-                          <strong>{fmtInt(point.miss)} tokens</strong>
-                        </span>
-                        <span className="bar-tooltip-row">
-                          <i className="dot response" />输出
-                          <strong>{fmtInt(point.response)} tokens</strong>
-                        </span>
-                      </>
-                    )}
+                    <span className="bar-tooltip-row">
+                      <i className="dot hit" />输入（命中缓存）
+                      <strong>{fmtInt(point.hit)} tokens</strong>
+                    </span>
+                    <span className="bar-tooltip-row">
+                      <i className="dot miss" />输入（未命中缓存）
+                      <strong>{fmtInt(point.miss)} tokens</strong>
+                    </span>
+                    <span className="bar-tooltip-row">
+                      <i className="dot response" />输出
+                      <strong>{fmtInt(point.response)} tokens</strong>
+                    </span>
                   </div>
                 )}
                 <span className="bar-value">
@@ -774,15 +818,13 @@ function UsageChart({
                     style={{
                       height: `${point.total > 0 ? Math.max(MIN_BAR, (point.total / maxVal) * 100) : MIN_BAR}%`,
                     }}
-                    onMouseEnter={() => setHoveredIdx(idx)}
-                    onMouseLeave={() => setHoveredIdx(null)}
                   >
                     {point.total > 0 ? (
                       <>
-                        {isDeepSeek && point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
-                        {isDeepSeek && point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
+                        {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
+                        {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
                         {point.response > 0 && (
-                          <i className={`seg ${isDeepSeek ? "response" : "mimo-tokens"}`} style={{ flexGrow: point.response }} />
+                          <i className="seg response" style={{ flexGrow: point.response }} />
                         )}
                       </>
                     ) : (
@@ -795,13 +837,9 @@ function UsageChart({
             ))}
           </div>
           <div className="chart-legend-bottom">
-            {isDeepSeek && (
-              <>
-                <span className="chart-legend-item"><i className="dot hit" />命中</span>
-                <span className="chart-legend-item"><i className="dot miss" />未命中</span>
-              </>
-            )}
-            <span className="chart-legend-item"><i className={`dot ${isDeepSeek ? "response" : "mimo-tokens"}`} />{isDeepSeek ? "输出" : "Tokens"}</span>
+            <span className="chart-legend-item"><i className="dot hit" />命中</span>
+            <span className="chart-legend-item"><i className="dot miss" />未命中</span>
+            <span className="chart-legend-item"><i className="dot response" />输出</span>
           </div>
         </>
       ) : (
@@ -1098,33 +1136,39 @@ function SettingsPanel({
         </header>
 
         <SettingsSection icon={<KeyRound size={15} />} title="API Key">
-          <p>用于调用 DeepSeek API 获取余额和用量数据。当前 Windows 版本会保存在应用本地设置中。</p>
-          <p className="muted">API Key 只在当前这台 Windows 电脑本地保留。</p>
-          <p className="muted config-path">
-            <span>本地位置：</span>
-            <span>{configPath}</span>
-          </p>
-          <div className="key-row">
-            <input
-              aria-label="API Key"
-              type="password"
-              value={apiKey}
-              placeholder={config?.apiKeyConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : "sk-..."}
-              onChange={(event) => setApiKey(event.target.value)}
-            />
-          </div>
-          <div className="settings-actions">
-            <button className="primary" onClick={saveApiKey} disabled={busy || !apiKey.trim()}>
-              验证并保存
-            </button>
-            <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}>
-              <CheckCircle2 size={17} />
-              {config?.apiKeyConfigured ? "已配置" : "未配置"}
-            </span>
-            <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>
-              清除 Key
-            </button>
-          </div>
+          {provider === "deepseek" ? (
+            <>
+              <p>用于调用 DeepSeek API 获取余额和用量数据。当前 Windows 版本会保存在应用本地设置中。</p>
+              <p className="muted">API Key 只在当前这台 Windows 电脑本地保留。</p>
+              <p className="muted config-path">
+                <span>本地位置：</span>
+                <span>{configPath}</span>
+              </p>
+              <div className="key-row">
+                <input
+                  aria-label="API Key"
+                  type="password"
+                  value={apiKey}
+                  placeholder={config?.apiKeyConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : "sk-..."}
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+              </div>
+              <div className="settings-actions">
+                <button className="primary" onClick={saveApiKey} disabled={busy || !apiKey.trim()}>
+                  验证并保存
+                </button>
+                <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}>
+                  <CheckCircle2 size={17} />
+                  {config?.apiKeyConfigured ? "已配置" : "未配置"}
+                </span>
+                <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>
+                  清除 Key
+                </button>
+              </div>
+            </>
+          ) : (
+            <p>MiMo 平台通过小米账号登录认证，无需 API Key。切换到 MiMo 后会自动弹出登录窗口。</p>
+          )}
         </SettingsSection>
 
         {provider === "deepseek" ? (
@@ -1188,12 +1232,12 @@ function SettingsPanel({
         )}
 
         <SettingsSection icon={<Power size={15} />} title="开机自启">
-          <p>开启后，每次登录 Windows 时自动启动 DeepSeek Monitor。</p>
+          <p>开启后，每次登录 Windows 时自动启动 {provider === "deepseek" ? "DeepSeek" : "MiMo"} Monitor。</p>
           <Toggle label="登录时自动启动" checked={autostart} onChange={saveAutostart} />
         </SettingsSection>
 
         <SettingsSection icon={<RefreshCw size={15} />} title="自动刷新">
-          <p>开启后，按设定周期自动从 DeepSeek API 拉取最新数据。</p>
+          <p>开启后，按设定周期自动从 {provider === "deepseek" ? "DeepSeek" : "MiMo"} API 拉取最新数据。</p>
           <Toggle label="启用自动刷新" checked={autoRefresh} onChange={saveAutoRefreshEnabled} />
           {autoRefresh && (
             <div className="segmented">
@@ -1297,32 +1341,45 @@ function ModelDetailPanel({
     totalText = modelData ? fmtTokensShort(modelData.totalTokens) : "—";
   }
 
-  const days = isDeepSeek
-    ? recentUsageDays(dsUsage?.days ?? [])
-    : (mimoUsage?.days ?? []);
-  const points = isDeepSeek
-    ? days.map((day) => {
-        const d = day as UsageDay;
-        const hit = isFlash ? d.flashCacheHit : d.proCacheHit;
-        const miss = isFlash ? d.flashCacheMiss : d.proCacheMiss;
-        const response = isFlash ? d.flashResponse : d.proResponse;
-        return { date: d.date, hit, miss, response, total: hit + miss + response };
-      })
-    : days.map((day) => {
-        const d = day as MimoUsageDay;
-        const key = model;
-        const modelDay = d.models.find((m) => m.key === key);
-        const tokens = modelDay?.totalTokens ?? 0;
-        return { date: d.date, hit: 0, miss: 0, response: tokens, total: tokens };
-      });
-  const maxVal = Math.max(...points.map((point) => point.total), 1);
-  const rangeText =
-    points.length > 0 ? `${mmdd(points[0].date)} - ${mmdd(points[points.length - 1].date)}` : "";
-
   const detailModelData = isDeepSeek ? (dsUsage?.models.find((item) => item.key === model) ?? null) : (mimoUsage?.models.find((m) => m.key === model) ?? null);
 
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
-  const MIN_BAR = 3; // 整根柱子的最小可见高度百分比（含空数据占位）
+  const [weekOffset, setWeekOffset] = React.useState(0);
+  const MIN_BAR = 3;
+  const DAYS_PER_WEEK = 7;
+
+  // 统一 7 天窗口
+  const today = new Date();
+  const weekStart = addDays(today, weekOffset * DAYS_PER_WEEK - DAYS_PER_WEEK + 1);
+  const dayKeys = Array.from({ length: DAYS_PER_WEEK }, (_, i) => dateKey(addDays(weekStart, i)));
+
+  const dsMap = new Map((dsUsage?.days ?? []).map((d) => [d.date, d]));
+  const mimoMap = new Map((mimoUsage?.days ?? []).map((d) => [d.date, d]));
+
+  const points = dayKeys.map((date) => {
+    if (isDeepSeek) {
+      const d = dsMap.get(date);
+      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0 };
+      const hit = isFlash ? d.flashCacheHit : d.proCacheHit;
+      const miss = isFlash ? d.flashCacheMiss : d.proCacheMiss;
+      const response = isFlash ? d.flashResponse : d.proResponse;
+      return { date, hit, miss, response, total: hit + miss + response };
+    } else {
+      const d = mimoMap.get(date);
+      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0 };
+      const modelDay = d.models.find((m) => m.key === model);
+      const tokens = modelDay?.totalTokens ?? 0;
+      const hit = modelDay?.cacheHitTokens ?? 0;
+      const miss = modelDay?.cacheMissTokens ?? 0;
+      const resp = modelDay?.responseTokens ?? 0;
+      return { date, hit, miss, response: resp, total: tokens };
+    }
+  });
+
+  const maxVal = Math.max(...points.map((p) => p.total), 1);
+  const rangeText = `${mmdd(points[0]?.date ?? "")} - ${mmdd(points[points.length - 1]?.date ?? "")}`;
+  const canGoForward = weekOffset < 0;
+  const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
 
   return (
     <section className="panel detail-panel" data-testid="detail-panel">
@@ -1356,13 +1413,22 @@ function ModelDetailPanel({
             <h2>按日 Token 消耗</h2>
             <span>{rangeText}</span>
           </div>
+          <div className="chart-nav">
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} title="上一周">‹</button>
+            <span className="chart-nav-label">{weekLabel}</span>
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">›</button>
+          </div>
         </div>
         {usageState === "ok" && points.length > 0 ? (
           <>
             <div className="detail-bars" onMouseLeave={() => setHoveredIdx(null)}>
               {points.map((point, idx) => (
-                <div className="detail-bar-column" key={point.date}>
-                  {hoveredIdx === idx && point.total > 0 && (
+                <div
+                  className="detail-bar-column"
+                  key={point.date}
+                  onMouseEnter={() => setHoveredIdx(idx)}
+                >
+                  {hoveredIdx === idx && (
                     <div
                       className={`bar-tooltip${
                         idx <= 1 ? " align-left" : idx >= points.length - 2 ? " align-right" : ""
@@ -1372,40 +1438,33 @@ function ModelDetailPanel({
                         <span className="bar-tooltip-date">{point.date}</span>
                         <strong>{fmtInt(point.total)} tokens</strong>
                       </div>
-                      {isDeepSeek && (
-                        <>
-                          <span className="bar-tooltip-row">
-                            <i className="dot hit" />输入（命中缓存）
-                            <strong>{fmtInt(point.hit)} tokens</strong>
-                          </span>
-                          <span className="bar-tooltip-row">
-                            <i className="dot miss" />输入（未命中缓存）
-                            <strong>{fmtInt(point.miss)} tokens</strong>
-                          </span>
-                        </>
-                      )}
                       <span className="bar-tooltip-row">
-                        <i className={`dot ${isDeepSeek ? "response" : "mimo-tokens"}`} />{isDeepSeek ? "输出" : "Tokens"}
+                        <i className="dot hit" />输入（命中缓存）
+                        <strong>{fmtInt(point.hit)} tokens</strong>
+                      </span>
+                      <span className="bar-tooltip-row">
+                        <i className="dot miss" />输入（未命中缓存）
+                        <strong>{fmtInt(point.miss)} tokens</strong>
+                      </span>
+                      <span className="bar-tooltip-row">
+                        <i className="dot response" />输出
                         <strong>{fmtInt(point.response)} tokens</strong>
                       </span>
                     </div>
                   )}
                   <span>{point.total > 0 ? fmtTokensShort(point.total) : ""}</span>
                   <div className="detail-bar-slot">
-                    {/* 柱高按当天合计占最大值的比例；内部三段用 flex-grow 按真实 token 数分配，比例精确且永不溢出裁剪 */}
                     <div
                       className="detail-bar-stacked"
                       style={{
                         height: `${point.total > 0 ? Math.max(MIN_BAR, (point.total / maxVal) * 100) : MIN_BAR}%`,
                       }}
-                      onMouseEnter={() => setHoveredIdx(idx)}
-                      onMouseLeave={() => setHoveredIdx(null)}
                     >
                       {point.total > 0 ? (
                         <>
-                          {isDeepSeek && point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
-                          {isDeepSeek && point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
-                          {point.response > 0 && <i className={`seg ${isDeepSeek ? "response" : "mimo-tokens"}`} style={{ flexGrow: point.response }} />}
+                          {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
+                          {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
+                          {point.response > 0 && <i className="seg response" style={{ flexGrow: point.response }} />}
                         </>
                       ) : (
                         <i className="seg empty" />
@@ -1417,13 +1476,9 @@ function ModelDetailPanel({
               ))}
             </div>
             <div className="chart-legend-bottom">
-              {isDeepSeek && (
-                <>
-                  <span className="chart-legend-item"><i className="dot hit" />命中</span>
-                  <span className="chart-legend-item"><i className="dot miss" />未命中</span>
-                </>
-              )}
-              <span className="chart-legend-item"><i className={`dot ${isDeepSeek ? "response" : "mimo-tokens"}`} />{isDeepSeek ? "输出" : "Tokens"}</span>
+              <span className="chart-legend-item"><i className="dot hit" />命中</span>
+              <span className="chart-legend-item"><i className="dot miss" />未命中</span>
+              <span className="chart-legend-item"><i className="dot response" />输出</span>
             </div>
           </>
         ) : (

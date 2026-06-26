@@ -588,6 +588,48 @@ button {
   font-weight: 800;
 }
 
+/* 周导航按钮 */
+.chart-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chart-nav-btn {
+  background: none;
+  border: 1px solid rgba(var(--fg), 0.15);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s;
+}
+.chart-nav-btn:hover:not(:disabled) {
+  background: rgba(var(--fg), 0.1);
+}
+.chart-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.chart-nav-label {
+  font-size: 10px;
+  color: var(--text-faint);
+  min-width: 36px;
+  text-align: center;
+}
+
+/* 柱状图列整体可悬停（解决矮柱子难以 hover 的问题） */
+.bar-column,
+.detail-bar-column {
+  cursor: default;
+}
+
 .settings-panel {
   width: min(546px, 100vw);
   height: min(682px, 100vh);

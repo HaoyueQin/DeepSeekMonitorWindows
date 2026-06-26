@@ -15,11 +15,17 @@ DeepSeek / MiMo Monitor Windows: Windows desktop adaptation of felikschu/deepsee
 - 查询 DeepSeek API 账户余额，使用 DeepSeek 官方余额接口。
 - 查询 DeepSeek 平台用量数据，包括当月消费、模型 Token 总量、请求数、缓存命中、缓存未命中和输出 Token。
 - 支持 V4 Flash 与 V4 Pro 两类模型用量展示。
-- 支持最近 7 天消费趋势图和模型详情页。
+- 支持最近 7 天消费趋势图，可按周翻页浏览历史数据。
+- 支持模型详情页，按日 Token 消耗柱状图，同样支持周翻页。
 - 支持 Windows 托盘入口，主窗口默认不进入任务栏。
 - 支持 API Key 保存、清除和余额验证。
 - 支持用量 Token 自动同步和手动粘贴兜底。
-- **支持 MiMo 平台（Beta）**：可通过顶部切换至 MiMo 平台，查看账户余额。用量明细（按模型和日期分解）后端已实现，但 `api-platform_ph` 自动提取尚不稳定，暂未完全打通。
+- **MiMo 平台完整支持**：通过顶部按钮在 DeepSeek 与 MiMo 之间切换。
+  - MiMo 余额查询：通过 WebView2 + JavaScript Fetch 方式获取，支持 HttpOnly Cookie 登录态透传。
+  - MiMo 用量明细：按模型（V2.5 / V2.5 Pro）和日期分解的用量数据，包括 Token 总量、缓存命中/未命中、输出 Token。
+  - MiMo 每日趋势图：按日期聚合的用量数据，支持缓存命中明细展示。
+  - MiMo 静默查询：WebView 默认隐藏，仅在需要登录时弹出窗口。
+  - MiMo 401 自动跳转登录：检测到未登录时自动显示登录窗口。
 - 液态玻璃质感 UI：基于 `backdrop-filter: blur()` 实现动态高斯模糊，叠加半透明渐变层模拟 Vibrance 效果，边缘内高光+半透明描边模拟玻璃厚度与折射，支持深色/浅色主题。
 - UI 复用原 macOS 版本的视觉方向，并按 Windows Tauri 窗口做适配。
 
@@ -87,9 +93,11 @@ Tauri 打包目标当前配置为 NSIS 安装包，产物位于 `src-tauri/targe
 
 ### MiMo 平台使用说明
 
-主面板顶部可切换至 MiMo 平台。切换后会自动弹出 MiMo 网页登录窗口，登录成功后即可查看账户余额。
+主面板顶部可切换至 MiMo 平台。首次切换时会自动弹出小米账号登录窗口，登录成功后即可查看账户余额和用量数据。
 
-**当前状态**：余额查询可用；用量明细（模型 Token 统计）后端已实现，但 `api-platform_ph` 自动提取尚不稳定，暂未完全打通。首次使用如遇 401 错误，会自动跳转至小米账号登录页面。
+MiMo 平台通过 WebView2 代理机制获取数据，利用 HttpOnly Cookie 实现登录态透传。用量明细通过 `api-platform_ph` 动态参数调用 detail API 获取，支持按模型（V2.5 / V2.5 Pro）和日期分解。
+
+WebView 默认隐藏运行，仅在需要登录时弹出窗口。登录完成后窗口自动隐藏。
 
 ## 数据存储
 
@@ -171,6 +179,19 @@ Rust 后端依赖：
 ## 更新日志
 
 完整发布记录见 GitHub Releases。
+
+### v2.0.0
+
+- **MiMo 平台完整支持**：MiMo 从 Beta 升级为正式支持，用量明细、每日趋势图、缓存命中明细全部打通。
+- **MiMo 静默查询**：WebView 默认隐藏运行，仅在需要登录时弹出窗口，不再强制保持窗口打开。
+- **MiMo 用量明细**：通过 `on_page_load` hook 自动拦截 SPA 的 detail API 请求，提取 `api-platform_ph` 参数并缓存。支持按模型（V2.5 / V2.5 Pro）和日期分解的完整用量数据。
+- **MiMo 缓存命中明细**：图表展示每日缓存命中/未命中/输出 Token 分布，与 DeepSeek 统一显示规则。
+- **7 天窗口 + 周导航**：缓存命中明细和按日 Token 消耗图表默认显示最近 7 天，支持左右翻页浏览历史周数据，无数据天以 0 填充。
+- **悬停区域优化**：柱状图整列可悬停，解决矮柱子难以触发提示的问题。
+- **设置界面适配**：API Key、开机自启、自动刷新等设置项根据当前平台动态显示文案。MiMo 模式下隐藏 DeepSeek 专属的 API Key 和用量 Token 配置。
+- **并发防护**：detail 提取添加 `in_progress` 标记，防止多个提取同时运行导致的 cascade。
+- **Detail API 修复**：从 GET 改为 POST 方法（MiMo API 要求）。
+- **版本号升级**：v1.2.0 → v2.0.0。
 
 ### v1.2.0
 
