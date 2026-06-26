@@ -272,7 +272,7 @@ function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUs
         <SettingsSection icon={<Settings size={15} />} title="窗口大小">
           <p>选择预设窗口尺寸，或拖拽窗口边缘自由调整。</p>
           <div className="segmented">
-            {[{ label: "紧凑", w: 380, h: 560 }, { label: "标准", w: 463, h: 660 }, { label: "宽屏", w: 600, h: 700 }, { label: "大屏", w: 660, h: 900 }].map((preset) => (
+            {[{ label: "紧凑", w: 380, h: 600 }, { label: "标准", w: 463, h: 660 }, { label: "宽屏", w: 600, h: 700 }, { label: "大屏", w: 660, h: 900 }].map((preset) => (
               <button key={preset.label} onClick={() => { void invoke("resize_window", { width: preset.w, height: preset.h }).catch(() => {}); }}>{preset.label}</button>
             ))}
           </div>

@@ -210,7 +210,7 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   onSettings: () => void;
   onDetail: (model: string) => void;
 }) {
-  const [theme, setTheme] = React.useState<string>(() => localStorage.getItem("ui-theme") || "dark");
+  const [theme, setTheme] = React.useState<string>(() => localStorage.getItem("ui-theme") || "light");
   const toggleTheme = () => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); localStorage.setItem("ui-theme", next); document.documentElement.setAttribute("data-theme", next); };
 
   const isDeepSeek = provider === "deepseek";

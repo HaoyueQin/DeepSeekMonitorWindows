@@ -180,6 +180,20 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.2.0
+
+- **Rust 后端模块化重构**：`lib.rs`（1894 行）拆分为 6 个模块：`types.rs`、`config.rs`、`deepseek.rs`、`mimo.rs`、`tray.rs`，遵循高内聚低耦合原则。
+- **DPAPI 凭据加密**：API Key、Usage Token 使用 Windows DPAPI 加密存储（`enc1:` 前缀），向后兼容明文。
+- **持久化回调服务器**：tiny_http 回调服务器启动时创建一次，所有 API 调用复用同一端口，消除每次调用的线程创建开销。
+- **窗口可拉伸 + 预设**：支持拖拽窗口边缘自由调整大小（min 340×500，max 700×1200），设置中提供 4 个预设尺寸（紧凑/标准/宽屏/大屏），锚定右下角。
+- **安全加固**：CSP 强制执行、`withGlobalTauri: false`、注入脚本域名白名单、MiMo 窗口导航白名单、输入长度验证。
+- **离线数据缓存**：余额和用量数据自动缓存到 localStorage，API 失败时自动加载缓存数据。
+- **前端模块化**：拆分 `types.ts`、`utils.ts`、`DashboardPanel.tsx`；配置 Vitest 单元测试框架（16 个测试）。
+- **UI 改进**：默认主题改为浅色、刷新按钮添加 hover/active 反馈、紧凑预设高度优化、MiMo 平台设置界面适配。
+- **窗口大小修复**：CSS 面板改用 100% 填充窗口，`resize_window` 使用纯物理像素避免 DPI 问题。
+- **Detail API 修复**：从 GET 改为 POST（MiMo API 要求）。
+- **MiMo 查询稳定性**：`initialization_script` 替代 `on_page_load`、ph 缓存过期自动清除、401 重试限制、并发防护。
+
 ### v2.1.1
 
 - **MiMo 查询稳定性修复**：修复 `api-platform_ph` 缓存过期后不被清除导致 detail API 持续 401 的问题。fast-path 失败时自动清除旧 ph，让 `initialization_script` hook 重新捕获。
