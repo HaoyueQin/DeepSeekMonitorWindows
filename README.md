@@ -194,6 +194,13 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.4.3
+
+- **安全加固**：f64→u64 溢出防护、unsafe 块 SAFETY 注释、敏感数据日志降级为 debug!、解析失败添加 warn! 日志。
+- **代码质量**：UA 字符串提取为 `USER_AGENT` 常量、魔术数字提取为命名常量、`fetchWithCache` 工具函数消除重复缓存逻辑、`mimoDefaultModels` 提取为模块级常量。
+- **输入验证**：`lowBalanceThreshold` 服务端添加 `is_finite()` + `>= 0` 校验。
+- **编译缓存清理**：删除 8.5GB target 目录，仅保留 release 产物。
+
 ### v2.4.2
 
 - **设置 UI 统一**：所有分段按钮改为内联样式按钮组或下拉框，移除死代码 `.segmented` CSS。
