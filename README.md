@@ -196,12 +196,15 @@ Rust 后端依赖：
 
 ### v2.4.2
 
-- **汇率修复**：修正汇率计算方向（`n * rate` 而非 `n / rate`），更新缓存 key 丢弃旧反向值，修正 sanity check。
-- **手风琴动画优化**：从 `max-height` 改为 CSS Grid `grid-template-rows`，过渡更流畅。
 - **设置 UI 统一**：所有分段按钮改为内联样式按钮组或下拉框，移除死代码 `.segmented` CSS。
 - **下拉框自定义输入**：刷新间隔和通知冷却支持"自定义"选项，选择后出现输入框。
 - **Bug 修复**：`export_config_json`/`import_config_json` 未注册到 invoke_handler、CSS `var(--text)` 未定义、默认汇率 7.25→0.137、通知冷却预设增加 30 分钟、自定义状态从配置初始化。
 - **死代码清理**：移除 main.tsx/SettingsPanel 中未使用的 imports 和变量。
+
+### v2.4.1
+
+- **汇率修复**：修正汇率计算方向（`n * rate` 而非 `n / rate`），更新缓存 key 丢弃旧反向值，修正 sanity check。
+- **手风琴动画优化**：从 `max-height` 改为 CSS Grid `grid-template-rows`，过渡更流畅。
 
 ### v2.4.0
 
