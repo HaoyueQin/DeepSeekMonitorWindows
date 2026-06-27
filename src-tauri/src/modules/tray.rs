@@ -32,9 +32,12 @@ pub fn position_near_tray(window: &WebviewWindow) -> tauri::Result<()> {
 
 /// 显示主窗口并定位到右下角
 pub fn show_main_window(window: &WebviewWindow) {
-    let _ = position_near_tray(window);
+    // 先显示窗口，确保可见
     let _ = window.show();
+    let _ = window.unminimize();
     let _ = window.set_focus();
+    // 定位到右下角（失败不影响显示）
+    let _ = position_near_tray(window);
 }
 
 /// 初始化系统托盘图标和菜单
@@ -66,12 +69,9 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
-                    let is_visible = window.is_visible().unwrap_or(false);
-                    if is_visible {
-                        let _ = window.hide();
-                    } else {
-                        show_main_window(&window);
-                    }
+                    // Always show on tray click — user hides via title bar button
+                    let _ = window.unminimize();
+                    show_main_window(&window);
                 }
             }
         });

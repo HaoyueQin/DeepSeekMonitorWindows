@@ -4,7 +4,8 @@
 
 use std::{fs, path::PathBuf};
 
-use crate::modules::types::{AppConfig, StoredConfig};
+use crate::modules::types::AppConfig;
+pub use crate::modules::types::StoredConfig;
 
 // ─── DPAPI 加密 ──────────────────────────────────────────
 
@@ -380,6 +381,9 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, String> {
         theme: config.theme,
         currency: config.currency,
         efficiency_unit: config.efficiency_unit,
+        default_provider: config.default_provider,
+        mimo_refresh_interval_seconds: config.mimo_refresh_interval_seconds,
+        notify_cooldown_minutes: config.notify_cooldown_minutes,
     })
 }
 

@@ -39,11 +39,19 @@ pub struct StoredConfig {
     pub currency: String, // "cny" | "usd"
     #[serde(default = "default_efficiency_unit")]
     pub efficiency_unit: String, // "token_per_currency" | "currency_per_token"
+    #[serde(default = "default_provider")]
+    pub default_provider: String, // "deepseek" | "mimo"
+    #[serde(default)]
+    pub mimo_refresh_interval_seconds: u64, // 0 = use global
+    #[serde(default = "default_notify_cooldown")]
+    pub notify_cooldown_minutes: u64,
 }
 
 fn default_theme() -> String { "light".to_string() }
 fn default_currency() -> String { "cny".to_string() }
 fn default_efficiency_unit() -> String { "token_per_currency".to_string() }
+fn default_provider() -> String { "deepseek".to_string() }
+fn default_notify_cooldown() -> u64 { 30 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +75,12 @@ pub struct AppConfig {
     pub currency: String,
     #[serde(default = "default_efficiency_unit")]
     pub efficiency_unit: String,
+    #[serde(default = "default_provider")]
+    pub default_provider: String,
+    #[serde(default)]
+    pub mimo_refresh_interval_seconds: u64,
+    #[serde(default = "default_notify_cooldown")]
+    pub notify_cooldown_minutes: u64,
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────

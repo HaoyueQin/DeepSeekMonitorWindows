@@ -2,11 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getVersion } from "@tauri-apps/api/app";
-import {
-  BarChart3, Brain, CalendarDays, CheckCircle2, Clipboard, CreditCard,
-  Info, KeyRound, Power, RefreshCw, Settings, Shirt, SunMedium, X, Zap,
-} from "lucide-react";
+
 import "./styles.css";
 initLang();
 
@@ -32,13 +28,6 @@ const fetchCurrentUsage = async () => {
   } catch { return current; }
 };
 
-const refreshOptions = [
-  { label: "1 分钟", value: 60 },
-  { label: "5 分钟", value: 300 },
-  { label: "30 分钟", value: 1800 },
-  { label: "1 小时", value: 3600 },
-];
-
 // ─── App ───────────────────────────────────────────────────
 function App() {
   const [view, setView] = React.useState<ViewName>("dashboard");
@@ -53,7 +42,8 @@ function App() {
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = React.useState(60);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
-  const [exchangeRate, setExchangeRate] = React.useState<number>(7.25);
+  const [exchangeRate, setExchangeRate] = React.useState<number>(0.137);
+  const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("currency_per_token");
 
   const loadBalance = React.useCallback((p?: Provider) => {
     const active = p ?? provider;
@@ -114,9 +104,10 @@ function App() {
         if (!initialLoadDone.current) {
           initialLoadDone.current = true;
           if (config.provider !== providerRef.current) { setBalance(null); setBalanceState("loading"); setUsage(null); setUsageState("loading"); }
-          providerRef.current = config.provider; setProviderState(config.provider);
+          providerRef.current = config.defaultProvider || config.provider; setProviderState(config.defaultProvider || config.provider);
           setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60); setAutoRefreshEnabled(config.autoRefreshEnabled);
           setCurrency(config.currency || "cny");
+          setEfficiencyUnit(config.efficiencyUnit || "currency_per_token");
           // Fetch exchange rate with localStorage cache (24h TTL)
           const cached = localStorage.getItem("dsm-exrate-v2");
           if (cached) {
@@ -172,6 +163,7 @@ function App() {
           onDetail={(nextModel) => { setModel(nextModel); setView("detail"); }}
           currency={currency}
           exchangeRate={exchangeRate}
+          efficiencyUnit={efficiencyUnit}
         />
       )}
       {view === "settings" && (
@@ -181,6 +173,7 @@ function App() {
           onUsageCleared={() => { setUsage(null); setUsageState("loading"); }}
           onRefreshIntervalChanged={setRefreshIntervalSeconds} onAutoRefreshChanged={setAutoRefreshEnabled}
           onCurrencyChanged={setCurrency}
+          onEfficiencyUnitChanged={setEfficiencyUnit}
         />
       )}
       {view === "detail" && (

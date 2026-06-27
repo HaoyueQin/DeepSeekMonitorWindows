@@ -17,6 +17,9 @@ export type AppConfig = {
   theme: "light" | "dark" | "system";
   currency: "cny" | "usd";
   efficiencyUnit: "token_per_currency" | "currency_per_token";
+  defaultProvider: Provider;
+  mimoRefreshIntervalSeconds: number;
+  notifyCooldownMinutes: number;
 };
 
 export type BalanceData = {

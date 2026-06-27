@@ -1,7 +1,7 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BarChart3, Brain, CalendarDays, CreditCard, Settings, Shirt, SunMedium, X, Zap, RefreshCw } from "lucide-react";
-import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel } from "../types";
+import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel, AppConfig } from "../types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon } from "../utils";
 
 // ─── BalanceCard ───────────────────────────────────────────
@@ -54,7 +54,7 @@ export function BalanceCard({ balance, state, error, todayCost, monthCost, provi
 }
 
 // ─── UsageRow ──────────────────────────────────────────────
-export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDisplay, currency, exchangeRate }: {
+export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDisplay, currency, exchangeRate, efficiencyUnit }: {
   modelKey: string;
   data: UsageModel | null;
   maxTokens: number;
@@ -63,6 +63,7 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
   modelDisplay?: string;
   currency?: "cny" | "usd";
   exchangeRate?: number;
+  efficiencyUnit?: "token_per_currency" | "currency_per_token";
 }) {
   const isFlash = modelKey === "flash";
   const name = modelDisplay ?? (isFlash ? "V4 Flash" : "V4 Pro");
@@ -72,8 +73,12 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
     : state === "error" ? "用量不可用" : "—";
   const cost = data ? fmtMoney(data.cost, currency, exchangeRate) : "—";
   const sym = currency === "usd" ? "$" : "¥";
-  const displayCost = currency === "usd" && exchangeRate && exchangeRate > 0 ? data ? data.cost / exchangeRate : 0 : data ? data.cost : 0;
-  const ratio = data && data.cost > 0 ? `${(displayCost * 1_000_000 / data.totalTokens).toFixed(3)} ${sym}/MT` : "—";
+  const displayCost = currency === "usd" && exchangeRate && exchangeRate > 0 ? data ? data.cost * exchangeRate : 0 : data ? data.cost : 0;
+  const ratio = data && data.cost > 0
+    ? efficiencyUnit === "token_per_currency"
+      ? `${(data.totalTokens / displayCost / 1_000_000).toFixed(2)} MT/${sym}`
+      : `${(displayCost * 1_000_000 / data.totalTokens).toFixed(3)} ${sym}/MT`
+    : "—";
   const width = data ? `${Math.max(2, (data.totalTokens / maxTokens) * 100)}%` : "0%";
 
   return (
@@ -202,7 +207,7 @@ export function UsageChart({ usage, state, error, provider }: {
 }
 
 // ─── DashboardPanel ────────────────────────────────────────
-export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate }: {
+export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate, efficiencyUnit }: {
   provider: Provider;
   onProviderChange: (p: Provider) => void;
   balance: BalanceData | MimoBalanceData | null;
@@ -217,11 +222,13 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   onDetail: (model: string) => void;
   currency: "cny" | "usd";
   exchangeRate: number;
+  efficiencyUnit: "token_per_currency" | "currency_per_token";
 }) {
-  const [theme, setTheme] = React.useState<string>(() => localStorage.getItem("ui-theme") || "light");
-  const toggleTheme = () => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); localStorage.setItem("ui-theme", next); document.documentElement.setAttribute("data-theme", next); };
-  // 首次加载时设置 data-theme 属性，确保 CSS 主题生效
-  React.useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+  // Theme is managed by SettingsPanel via config; just ensure data-theme is set on mount
+  React.useEffect(() => {
+    const stored = localStorage.getItem("ui-theme") || "light";
+    document.documentElement.setAttribute("data-theme", stored);
+  }, []);
 
   const isDeepSeek = provider === "deepseek";
   const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
@@ -248,7 +255,7 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
         <div className="header-actions">
           <button aria-label="刷新" onClick={onRefresh}><RefreshCw size={22} /></button>
           <div className="skin-menu-wrap">
-            <button aria-label="Toggle theme" className="skin-toggle" title={theme === "dark" ? "Switch to light" : "Switch to dark"} onClick={toggleTheme}><Shirt size={21} /></button>
+            <button aria-label="Toggle theme" className="skin-toggle" title="切换主题" onClick={() => { const cur = localStorage.getItem("ui-theme") || "light"; const next = cur === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", next); localStorage.setItem("ui-theme", next); void invoke<AppConfig>("save_theme", { theme: next }).catch(() => {}); }}><Shirt size={21} /></button>
           </div>
           <button aria-label="设置" onClick={onSettings}><Settings size={23} /></button>
           <button aria-label="关闭" onClick={onClose}><X size={25} /></button>
@@ -258,11 +265,11 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
       <div className="usage-stack">
         {isDeepSeek ? (
           <>
-            <UsageRow modelKey="flash" data={flash ? { ...flash, key: "flash" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("flash")} currency={currency} exchangeRate={exchangeRate} />
-            <UsageRow modelKey="pro" data={pro ? { ...pro, key: "pro" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("pro")} currency={currency} exchangeRate={exchangeRate} />
+            <UsageRow modelKey="flash" data={flash ? { ...flash, key: "flash" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("flash")} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
+            <UsageRow modelKey="pro" data={pro ? { ...pro, key: "pro" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("pro")} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
           </>
         ) : topModels.map((m) => (
-          <UsageRow key={m.key} modelKey={modelIcon(m.key)} data={{ ...m, key: modelIcon(m.key) }} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(m.key)} modelDisplay={modelDisplayName(m.key)} currency={currency} exchangeRate={exchangeRate} />
+          <UsageRow key={m.key} modelKey={modelIcon(m.key)} data={{ ...m, key: modelIcon(m.key) }} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(m.key)} modelDisplay={modelDisplayName(m.key)} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
         ))}
       </div>
       <UsageChart usage={usage} state={usageState} error={usageError} provider={provider} />

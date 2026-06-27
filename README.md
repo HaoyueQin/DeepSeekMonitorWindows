@@ -122,10 +122,24 @@ WebView2 登录缓存通常位于：
 ```text
 DeepSeekMonitorWindows/
 ├── src/                         # React + TypeScript 前端
-│   ├── main.tsx                 # 主界面、设置页、详情页和 Tauri 调用
-│   └── styles.css               # Windows 桌面 UI 样式
+│   ├── main.tsx                 # App 入口、全局状态、路由
+│   ├── types.ts                 # TypeScript 类型定义
+│   ├── utils.ts                 # 工具函数（格式化、日期）
+│   ├── i18n.ts                  # 17 种语言国际化
+│   ├── styles.css               # Windows 桌面 UI 样式
+│   └── components/
+│       ├── DashboardPanel.tsx   # 主面板（余额、用量、图表）
+│       ├── SettingsPanel.tsx    # 设置面板（手风琴分类）
+│       └── ModelDetailPanel.tsx # 模型详情页
 ├── src-tauri/                   # Tauri + Rust 后端
-│   ├── src/lib.rs               # API 调用、配置存储、托盘、网页登录同步
+│   ├── src/
+│   │   ├── lib.rs               # Tauri commands、窗口管理、回调服务器
+│   │   └── modules/
+│   │       ├── types.rs         # 共享数据结构
+│   │       ├── config.rs        # DPAPI 加密配置、读写
+│   │       ├── deepseek.rs      # DeepSeek API 调用
+│   │       ├── mimo.rs          # MiMo API 调用（WebView 代理）
+│   │       └── tray.rs          # 系统托盘与窗口定位
 │   ├── tauri.conf.json          # Tauri 窗口、打包和安全配置
 │   ├── Cargo.toml               # Rust 依赖与包信息
 │   └── capabilities/            # Tauri 权限配置
@@ -184,6 +198,10 @@ Rust 后端依赖：
 
 - **汇率修复**：修正汇率计算方向（`n * rate` 而非 `n / rate`），更新缓存 key 丢弃旧反向值，修正 sanity check。
 - **手风琴动画优化**：从 `max-height` 改为 CSS Grid `grid-template-rows`，过渡更流畅。
+- **设置 UI 统一**：所有分段按钮改为内联样式按钮组或下拉框，移除死代码 `.segmented` CSS。
+- **下拉框自定义输入**：刷新间隔和通知冷却支持"自定义"选项，选择后出现输入框。
+- **Bug 修复**：`export_config_json`/`import_config_json` 未注册到 invoke_handler、CSS `var(--text)` 未定义、默认汇率 7.25→0.137、通知冷却预设增加 30 分钟、自定义状态从配置初始化。
+- **死代码清理**：移除 main.tsx/SettingsPanel 中未使用的 imports 和变量。
 
 ### v2.4.0
 

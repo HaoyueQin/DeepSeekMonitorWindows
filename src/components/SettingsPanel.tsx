@@ -8,21 +8,15 @@ import {
 } from "lucide-react";
 import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
 import { fmtMoney } from "../utils";
-import { t, getLang, setLang, type Lang, LANG_OPTIONS, PINNED_LANGS } from "../i18n";
-
-const refreshOptions = [
-  { label: "1 分钟", value: 60 },
-  { label: "5 分钟", value: 300 },
-  { label: "30 分钟", value: 1800 },
-  { label: "1 小时", value: 3600 },
-];
+import { t, getLang, setLang, LANG_OPTIONS, PINNED_LANGS } from "../i18n";
 
 // ─── SettingsPanel ─────────────────────────────────────────
-export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged }: {
+export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged }: {
   provider: Provider; onProviderChange: (p: Provider) => void; onBack: () => void;
   onUsageLoaded: (usage: UsageResult | MimoUsageResult) => void; onUsageCleared: () => void;
   onRefreshIntervalChanged: (seconds: number) => void; onAutoRefreshChanged: (enabled: boolean) => void;
   onCurrencyChanged: (currency: "cny" | "usd") => void;
+  onEfficiencyUnitChanged: (unit: "token_per_currency" | "currency_per_token") => void;
 }) {
   const [apiKey, setApiKey] = React.useState("");
   const [config, setConfig] = React.useState<AppConfig | null>(null);
@@ -47,13 +41,19 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [downloadProgress, setDownloadProgress] = React.useState<{ downloaded: number; total: number | null } | null>(null);
   const [downloadDone, setDownloadDone] = React.useState(false);
   const [activeCategory, setActiveCategory] = React.useState<string | null>(null);
+  const [customDsRefresh, setCustomDsRefresh] = React.useState(false);
+  const [customMimoRefresh, setCustomMimoRefresh] = React.useState(false);
+  const [customCooldown, setCustomCooldown] = React.useState(false);
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("light");
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("token_per_currency");
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
+  const PRESET_REFRESH = [60, 300, 1800, 3600];
+  const PRESET_COOLDOWN = [10, 30, 60, 180, 360];
+
   React.useEffect(() => {
-    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); }).catch(() => setStatus("浏览器预览模式"));
+    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); const ri = c.refreshIntervalSeconds || 60; setRefresh(ri); setCustomDsRefresh(!PRESET_REFRESH.includes(ri)); setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0); setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30)); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); }).catch(() => setStatus("浏览器预览模式"));
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
@@ -109,6 +109,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     // Apply theme immediately
     const apply = val === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : val;
     document.documentElement.setAttribute("data-theme", apply);
+    localStorage.setItem("ui-theme", apply); // sync with DashboardPanel
     void invoke<AppConfig>("save_theme", { theme: val }).then((c) => { setConfig(c); }).catch(() => setTheme(prev));
   }, [theme]);
 
@@ -120,13 +121,15 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
 
   const saveEfficiencyUnit = React.useCallback((val: "token_per_currency" | "currency_per_token") => {
     const prev = efficiencyUnit; setEfficiencyUnit(val);
-    void invoke<AppConfig>("save_efficiency_unit", { unit: val }).then((c) => { setConfig(c); }).catch(() => setEfficiencyUnit(prev));
-  }, [efficiencyUnit]);
+    onEfficiencyUnitChanged(val);
+    void invoke<AppConfig>("save_efficiency_unit", { unit: val }).then((c) => { setConfig(c); }).catch(() => { setEfficiencyUnit(prev); onEfficiencyUnitChanged(prev); });
+  }, [efficiencyUnit, onEfficiencyUnitChanged]);
 
   // Apply theme on mount and when theme changes
   React.useEffect(() => {
     const apply = theme === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme;
     document.documentElement.setAttribute("data-theme", apply);
+    localStorage.setItem("ui-theme", apply); // sync with DashboardPanel
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       const handler = (e: MediaQueryListEvent) => {
@@ -203,31 +206,28 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     { key: "general", icon: <Settings size={15} />, label: t('settings.cat_general') },
     { key: "display", icon: <Monitor size={15} />, label: t('settings.cat_display') },
     { key: "notify", icon: <Bell size={15} />, label: t('notify.title') },
+    { key: "data", icon: <Settings size={15} />, label: t('settings.cat_data') },
     { key: "about", icon: <Info size={15} />, label: t('settings.cat_about') },
   ];
 
-  // Account category content
+  // Account category content - always show both platforms
   const accountContent = (
     <>
-      <SettingsSection icon={<KeyRound size={15} />} title="API Key">
-        {provider === "deepseek" ? (
-          <>
-            <p>用于调用 DeepSeek API 获取余额和用量数据。当前 Windows 版本会保存在应用本地设置中。</p>
-            <p className="muted">API Key 只在当前这台 Windows 电脑本地保留。</p>
-            <p className="muted config-path"><span>本地位置：</span><span>{configPath}</span></p>
-            <div className="key-row"><input aria-label="API Key" type="password" maxLength={256} value={apiKey} placeholder={config?.apiKeyConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : "sk-..."} onChange={(e) => setApiKey(e.target.value)} /></div>
-            <div className="settings-actions">
-              <button className="primary" onClick={saveApiKey} disabled={busy || !apiKey.trim()}>验证并保存</button>
-              <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.apiKeyConfigured ? "已配置" : "未配置"}</span>
-              <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>清除 Key</button>
-            </div>
-          </>
-        ) : <p>MiMo 平台通过小米账号登录认证，无需 API Key。切换到 MiMo 后会自动弹出登录窗口。</p>}
-      </SettingsSection>
-      {provider === "deepseek" ? (
+      {/* DeepSeek Account */}
+      <div style={{ marginBottom: 16, borderLeft: '3px solid #4f8cff', paddingLeft: 12 }}>
+        <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#4f8cff' }}>DeepSeek</div>
+        <SettingsSection icon={<KeyRound size={15} />} title="API Key">
+          <p>用于调用 DeepSeek API 获取余额和用量数据。</p>
+          <p className="muted">API Key 只在当前这台 Windows 电脑本地保留。</p>
+          <div className="key-row"><input aria-label="API Key" type="password" maxLength={256} value={apiKey} placeholder={config?.apiKeyConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : "sk-..."} onChange={(e) => setApiKey(e.target.value)} /></div>
+          <div className="settings-actions">
+            <button className="primary" onClick={saveApiKey} disabled={busy || !apiKey.trim()}>验证并保存</button>
+            <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.apiKeyConfigured ? "已配置" : "未配置"}</span>
+            <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>清除 Key</button>
+          </div>
+        </SettingsSection>
         <SettingsSection icon={<BarChart3 size={15} />} title="用量同步 Token">
-          <p>用于同步 Token 用量、消费和趋势图。DeepSeek 无官方用量 API，需网页登录 token（与上面的 API Key 不同）。</p>
-          <p className="muted">方式一网页登录自动同步</p>
+          <p>用于同步 Token 用量、消费和趋势图。DeepSeek 无官方用量 API，需网页登录 token（与 API Key 不同）。</p>
           <div className="settings-actions usage-sync-actions">
             <button className="primary" onClick={startUsageSync} disabled={usageSyncing}>{usageSyncing ? "等待登录" : "网页登录自动同步"}</button>
             <span className={config?.usageTokenConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.usageTokenConfigured ? "已配置" : "未配置"}</span>
@@ -237,22 +237,23 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           <button className="link-button" onClick={() => setShowManualPaste((v) => !v)}>{showManualPaste ? "收起手动粘贴" : "方式二：手动粘贴 token"}</button>
           {showManualPaste && (<>
             <p className="muted">获取：浏览器登录 platform.deepseek.com，按 F12 打开控制台，输入 JSON.parse(localStorage.userToken).value 回车，复制返回的字符串。</p>
-            <p className="muted">token 会过期，用量查询失败时重新获取一次即可。</p>
             <div className="key-row"><input aria-label="用量 Token" type="password" maxLength={4096} value={usageToken} placeholder={config?.usageTokenConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : ""} onChange={(e) => setUsageToken(e.target.value)} /></div>
             <div className="settings-actions"><button className="primary" onClick={saveUsageToken} disabled={busy || !usageToken.trim()}>保存 Token</button></div>
           </>)}
         </SettingsSection>
-      ) : (
+      </div>
+
+      {/* MiMo Account */}
+      <div style={{ marginBottom: 16, borderLeft: '3px solid #10b981', paddingLeft: 12 }}>
+        <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#10b981' }}>MiMo</div>
         <SettingsSection icon={<BarChart3 size={15} />} title="MiMo 登录">
           <p>通过小米账号登录 MiMo 平台，登录成功后即可查看余额和用量数据。</p>
           <div className="settings-actions"><button className="primary" onClick={startMimoSync} disabled={mimoSyncing}>{mimoSyncing ? "正在打开…" : "打开 MiMo 登录"}</button></div>
           {mimoStatus && <p className="muted">{mimoStatus}</p>}
         </SettingsSection>
-      )}
+      </div>
     </>
   );
-
-  // General category content
   const generalContent = (
     <>
       <SettingsSection icon={<Power size={15} />} title={t('settings.general')}>
@@ -260,17 +261,71 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         <p>{t('settings.autostart_desc')}</p>
         <Toggle label={t('settings.auto_refresh')} checked={autoRefresh} onChange={saveAutoRefreshEnabled} />
         <p>{t('settings.auto_refresh_desc')}</p>
-        {autoRefresh && (<div className="segmented">{refreshOptions.map((o) => (<button key={o.value} className={refresh === o.value ? "selected" : ""} onClick={() => saveRefreshInterval(o.value)}>{o.label}</button>))}</div>)}
-      </SettingsSection>
-      <SettingsSection icon={<Palette size={15} />} title={t('settings.theme')}>
-        <p>选择应用的外观主题。</p>
-        <div className="segmented">
-          {(["light", "dark", "system"] as const).map((opt) => (
-            <button key={opt} className={theme === opt ? "selected" : ""} onClick={() => saveTheme(opt)}>
-              {opt === "light" ? t('settings.theme_light') : opt === "dark" ? t('settings.theme_dark') : t('settings.theme_system')}
-            </button>
-          ))}
-        </div>
+        {autoRefresh && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ fontSize: '0.85em', fontWeight: 500 }}>DeepSeek 刷新间隔</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
+                  value={customDsRefresh ? -1 : refresh}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (v === -1) { setCustomDsRefresh(true); return; }
+                    setCustomDsRefresh(false);
+                    saveRefreshInterval(v);
+                  }}>
+                  <option value={60}>1 分钟</option>
+                  <option value={300}>5 分钟</option>
+                  <option value={1800}>30 分钟</option>
+                  <option value={3600}>1 小时</option>
+                  <option value={-1}>自定义</option>
+                </select>
+                {customDsRefresh && (
+                  <>
+                    <input type="number" min="1" max="1440" style={{ width: 80, fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
+                      placeholder="数值"
+                      onKeyDown={(e) => { if (e.key === 'Enter') { const val = parseInt((e.target as HTMLInputElement).value); if (val > 0) saveRefreshInterval(val * 60); } }} />
+                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>分钟</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div>
+              <span style={{ fontSize: '0.85em', fontWeight: 500 }}>MiMo 刷新间隔</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
+                  value={customMimoRefresh ? -1 : (config?.mimoRefreshIntervalSeconds || 60)}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (v === -1) { setCustomMimoRefresh(true); return; }
+                    setCustomMimoRefresh(false);
+                    void invoke<AppConfig>("save_mimo_refresh_interval", { seconds: v }).then(setConfig).catch(() => {});
+                  }}>
+                  <option value={60}>1 分钟</option>
+                  <option value={300}>5 分钟</option>
+                  <option value={1800}>30 分钟</option>
+                  <option value={3600}>1 小时</option>
+                  <option value={-1}>自定义</option>
+                </select>
+                {customMimoRefresh && (
+                  <>
+                    <input type="number" min="1" max="1440" style={{ width: 80, fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
+                      placeholder="数值"
+                      onKeyDown={(e) => { if (e.key === 'Enter') { const val = parseInt((e.target as HTMLInputElement).value); if (val > 0) void invoke<AppConfig>("save_mimo_refresh_interval", { seconds: val * 60 }).then(setConfig).catch(() => {}); } }} />
+                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>分钟</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        <p style={{ marginTop: 12 }}>{t('settings.default_provider')}</p>
+        <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text-strong)' }}
+          value={config?.defaultProvider || "deepseek"}
+          onChange={(e) => { void invoke<AppConfig>("save_default_provider", { provider: e.target.value }).then(setConfig).catch(() => {}); }}>
+          <option value="deepseek">DeepSeek</option>
+          <option value="mimo">MiMo</option>
+        </select>
       </SettingsSection>
       <SettingsSection icon={<Globe size={15} />} title={t('settings.language')}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -316,28 +371,37 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     <>
       <SettingsSection icon={<Palette size={15} />} title={t('settings.currency')}>
         <p>选择金额显示的货币。</p>
-        <div className="segmented">
+        <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
           {(["cny", "usd"] as const).map((opt) => (
-            <button key={opt} className={currency === opt ? "selected" : ""} onClick={() => saveCurrency(opt)}>
+            <button key={opt} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: currency === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: currency === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => saveCurrency(opt)}>
               {opt === "cny" ? t('settings.currency_cny') : t('settings.currency_usd')}
             </button>
           ))}
         </div>
         <p style={{ marginTop: 12 }}>效率指标显示方式：</p>
-        <div className="segmented">
-          <button className={efficiencyUnit === "token_per_currency" ? "selected" : ""} onClick={() => saveEfficiencyUnit("token_per_currency")}>
-            {currency === "usd" ? "MT/$" : "MT/¥"}
-          </button>
-          <button className={efficiencyUnit === "currency_per_token" ? "selected" : ""} onClick={() => saveEfficiencyUnit("currency_per_token")}>
-            {currency === "usd" ? "$/MT" : "¥/MT"}
-          </button>
+        <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
+          {(["token_per_currency", "currency_per_token"] as const).map((opt) => (
+            <button key={opt} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: efficiencyUnit === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: efficiencyUnit === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => saveEfficiencyUnit(opt)}>
+              {opt === "token_per_currency" ? (currency === "usd" ? "MT/$" : "MT/¥") : (currency === "usd" ? "$/MT" : "¥/MT")}
+            </button>
+          ))}
+        </div>
+      </SettingsSection>
+      <SettingsSection icon={<Palette size={15} />} title={t('settings.theme')}>
+        <p>选择应用的外观主题。</p>
+        <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
+          {(["light", "dark", "system"] as const).map((opt) => (
+            <button key={opt} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: theme === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: theme === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => saveTheme(opt)}>
+              {opt === "light" ? t('settings.theme_light') : opt === "dark" ? t('settings.theme_dark') : t('settings.theme_system')}
+            </button>
+          ))}
         </div>
       </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.window_size')}>
         <p>{t('settings.window_desc')}</p>
-        <div className="segmented">
+        <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
           {[{ label: t('settings.compact'), w: 380, h: 600 }, { label: t('settings.standard'), w: 463, h: 660 }, { label: t('settings.wide'), w: 600, h: 700 }, { label: t('settings.large'), w: 660, h: 900 }].map((preset) => (
-            <button key={preset.label} onClick={() => { void invoke("resize_window", { width: preset.w, height: preset.h }).catch(() => {}); }}>{preset.label}</button>
+            <button key={preset.label} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: 'rgba(var(--fg), 0.12)', color: 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => { void invoke("resize_window", { width: preset.w, height: preset.h }).catch(() => {}); }}>{preset.label}</button>
           ))}
         </div>
       </SettingsSection>
@@ -350,11 +414,40 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       <Toggle label={t('notify.toggle')} checked={lowBalanceNotify} onChange={saveLowBalanceNotify} />
       <p>{t('notify.desc')}</p>
       {lowBalanceNotify && (
-        <div className="key-row" style={{ marginTop: 8 }}>
-          <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginRight: 8 }}>{t('notify.threshold')}：</span>
-          <input type="number" min="0" step="0.01" value={lowBalanceThreshold} onChange={(e) => saveLowBalanceThreshold(e.target.value)} style={{ width: 100 }} />
-          <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginLeft: 4 }}>{currency === "usd" ? "$" : "¥"}</span>
-        </div>
+        <>
+          <div className="key-row" style={{ marginTop: 8 }}>
+            <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginRight: 8 }}>{t('notify.threshold')}：</span>
+            <input type="number" min="0" step="0.01" value={lowBalanceThreshold} onChange={(e) => saveLowBalanceThreshold(e.target.value)} style={{ width: 100 }} />
+            <span style={{ fontSize: '0.8em', color: 'var(--text-faint)', marginLeft: 4 }}>{currency === "usd" ? "$" : "¥"}</span>
+          </div>
+          <p style={{ marginTop: 12 }}>{t('settings.notify_cooldown')}</p>
+          <p className="muted">{t('settings.notify_cooldown_desc')}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
+              value={customCooldown ? -1 : (config?.notifyCooldownMinutes || 30)}
+              onChange={(e) => {
+                const v = parseInt(e.target.value);
+                if (v === -1) { setCustomCooldown(true); return; }
+                setCustomCooldown(false);
+                void invoke<AppConfig>("save_notify_cooldown", { minutes: v }).then(setConfig).catch(() => {});
+              }}>
+              <option value={10}>10 分钟</option>
+              <option value={30}>30 分钟</option>
+              <option value={60}>1 小时</option>
+              <option value={180}>3 小时</option>
+              <option value={360}>6 小时</option>
+              <option value={-1}>自定义</option>
+            </select>
+            {customCooldown && (
+              <>
+                <input type="number" min="1" style={{ width: 80, fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
+                  placeholder="数值"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { const val = parseInt((e.target as HTMLInputElement).value); if (val > 0) void invoke<AppConfig>("save_notify_cooldown", { minutes: val }).then(setConfig).catch(() => {}); } }} />
+                <span style={{ fontSize: '0.8em', opacity: 0.6 }}>分钟</span>
+              </>
+            )}
+          </div>
+        </>
       )}
     </SettingsSection>
   );
@@ -398,7 +491,112 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           <p className="muted">v{updateInfo.version} {updateInfo.date ? `(${updateInfo.date})` : ""}</p>
         </div>
       )}
+      <div style={{ marginTop: 12, fontSize: '0.75em', color: 'var(--text-faint)', wordBreak: 'break-all' }}>
+        <span>配置文件：</span><span>{configPath}</span>
+      </div>
     </SettingsSection>
+  );
+
+  // Data management category content
+  const [exportFormat, setExportFormat] = React.useState<"json" | "csv">("json");
+  const [exportPlatform, setExportPlatform] = React.useState<"all" | "deepseek" | "mimo">("all");
+
+  const handleExport = () => {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('dsm-')) continue;
+      if (exportPlatform === "deepseek" && key.includes('mimo')) continue;
+      if (exportPlatform === "mimo" && !key.includes('mimo') && !key.includes('platform')) continue;
+      keys.push(key);
+    }
+
+    if (exportFormat === "json") {
+      const data: Record<string, unknown> = {};
+      for (const key of keys) {
+        try { data[key] = JSON.parse(localStorage.getItem(key) || ''); } catch { data[key] = localStorage.getItem(key); }
+      }
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `dsm-data-${exportPlatform}.json`; a.click(); URL.revokeObjectURL(url);
+    } else {
+      // CSV: flatten each key-value pair
+      const rows = [["key", "value"]];
+      for (const key of keys) {
+        const val = localStorage.getItem(key) || '';
+        try {
+          const parsed = JSON.parse(val);
+          if (typeof parsed === 'object' && parsed !== null) {
+            // Flatten nested objects
+            for (const [k, v] of Object.entries(parsed)) {
+              rows.push([`${key}.${k}`, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
+            }
+          } else {
+            rows.push([key, String(parsed)]);
+          }
+        } catch { rows.push([key, val]); }
+      }
+      const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob(['\uFEFF' + csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `dsm-data-${exportPlatform}.csv`; a.click(); URL.revokeObjectURL(url);
+    }
+  };
+
+  const dataContent = (
+    <>
+      <SettingsSection icon={<Settings size={15} />} title={t('settings.clear_cache')}>
+        <p>{t('settings.clear_cache_desc')}</p>
+        <div className="settings-actions">
+          <button className="secondary" onClick={() => { localStorage.clear(); alert("缓存已清除"); }}>{t('settings.clear_cache')}</button>
+        </div>
+      </SettingsSection>
+      <SettingsSection icon={<Settings size={15} />} title="导出使用数据">
+        <p>导出缓存的使用数据（余额、用量等），支持多种格式和平台过滤。</p>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>格式：</span>
+          <div style={{ display: 'inline-flex', gap: 6 }}>
+            {(["json", "csv"] as const).map((opt) => (
+              <button key={opt} style={{ border: 0, borderRadius: 8, padding: '6px 12px', background: exportFormat === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: exportFormat === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.8em', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase' }} onClick={() => setExportFormat(opt)}>{opt}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>平台：</span>
+          <div style={{ display: 'inline-flex', gap: 6 }}>
+            {(["all", "deepseek", "mimo"] as const).map((opt) => (
+              <button key={opt} style={{ border: 0, borderRadius: 8, padding: '6px 12px', background: exportPlatform === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: exportPlatform === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.8em', fontWeight: 600, cursor: 'pointer' }} onClick={() => setExportPlatform(opt)}>{opt === "all" ? "全部" : opt === "deepseek" ? "DeepSeek" : "MiMo"}</button>
+            ))}
+          </div>
+        </div>
+        <div className="settings-actions">
+          <button className="secondary" onClick={async () => {
+            const { save } = await import("@tauri-apps/plugin-dialog");
+            const ext = exportFormat === "json" ? "json" : "csv";
+            const filePath = await save({
+              defaultPath: `dsm-data-${exportPlatform}.${ext}`,
+              filters: [{ name: exportFormat.toUpperCase(), extensions: [ext] }]
+            });
+            if (!filePath) return;
+            handleExport();
+          }}>导出 {exportFormat.toUpperCase()}</button>
+        </div>
+      </SettingsSection>
+      <SettingsSection icon={<Settings size={15} />} title="导入使用数据">
+        <p>从 JSON 文件导入使用数据，将覆盖当前缓存。</p>
+        <div className="settings-actions">
+          <button className="secondary" onClick={() => {
+            const input = document.createElement("input"); input.type = "file"; input.accept = ".json";
+            input.onchange = () => { const file = input.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => {
+              try {
+                const data = JSON.parse(reader.result as string);
+                for (const [key, val] of Object.entries(data)) { if (key.startsWith('dsm-')) localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); }
+                alert("使用数据已导入，刷新页面生效");
+              } catch { alert("导入失败：文件格式错误"); }
+            }; reader.readAsText(file); };
+            input.click();
+          }}>导入使用数据</button>
+        </div>
+      </SettingsSection>
+    </>
   );
 
   const categoryContent: Record<string, React.ReactNode> = {
@@ -406,6 +604,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     general: generalContent,
     display: displayContent,
     notify: notifyContent,
+    data: dataContent,
     about: aboutContent,
   };
 
@@ -445,7 +644,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
                 transition: 'grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                 paddingLeft: 8, paddingRight: 8,
               }}>
-                <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                <div style={{ overflow: activeCategory === cat.key ? 'visible' : 'hidden', minHeight: 0 }}>
                   {categoryContent[cat.key]}
                 </div>
               </div>

@@ -228,6 +228,46 @@ fn save_efficiency_unit(unit: String) -> Result<AppConfig, String> {
     config::to_app_config(config)
 }
 
+#[tauri::command]
+fn save_default_provider(provider: String) -> Result<AppConfig, String> {
+    if !["deepseek", "mimo"].contains(&provider.as_str()) {
+        return Err("无效平台".to_string());
+    }
+    let mut config = config::read_stored_config()?;
+    config.default_provider = provider;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_mimo_refresh_interval(seconds: u64) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    config.mimo_refresh_interval_seconds = seconds;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_notify_cooldown(minutes: u64) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    config.notify_cooldown_minutes = minutes;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn export_config_json() -> Result<String, String> {
+    let config = config::read_stored_config()?;
+    serde_json::to_string_pretty(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn import_config_json(json: String) -> Result<AppConfig, String> {
+    let config: config::StoredConfig = serde_json::from_str(&json).map_err(|e| format!("JSON 解析失败: {}", e))?;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
 /// 余额检查并发送 Windows 通知
 fn check_and_notify_low_balance(_app: &tauri::AppHandle, balance: &BalanceResult) {
     let config = match config::read_stored_config() {
@@ -452,6 +492,9 @@ pub fn run() {
             save_theme,
             save_currency,
             save_efficiency_unit,
+            save_default_provider,
+            save_mimo_refresh_interval,
+            save_notify_cooldown,
             set_provider,
             fetch_balance,
             save_usage_token,
@@ -465,10 +508,13 @@ pub fn run() {
             ensure_mimo_webview,
             mimo_api_response,
             check_update,
-            install_update
+            install_update,
+            export_config_json,
+            import_config_json
         ])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

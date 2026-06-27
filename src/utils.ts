@@ -1,5 +1,12 @@
 import type { UsageDay } from "./types";
 
+export const REFRESH_OPTIONS = [
+  { label: "1 分钟", value: 60 },
+  { label: "5 分钟", value: 300 },
+  { label: "30 分钟", value: 1800 },
+  { label: "1 小时", value: 3600 },
+];
+
 export const fmtInt = (n: number) => Math.round(n).toLocaleString("en-US");
 
 export const fmtTokensShort = (n: number) => {
