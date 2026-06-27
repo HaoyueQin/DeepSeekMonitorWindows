@@ -23,6 +23,9 @@ use crate::modules::types::{BalanceResult, UsageDaySummary, UsageModelSummary, U
 use crate::modules::config::{read_stored_config, write_stored_config, to_app_config};
 use crate::modules::types::AppConfig;
 
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
+const REQUEST_TIMEOUT_SECS: u64 = 15;
+
 // ─── 余额查询 ────────────────────────────────────────────
 
 pub async fn do_fetch_balance() -> Result<BalanceResult, String> {
@@ -36,7 +39,7 @@ pub async fn do_fetch_balance() -> Result<BalanceResult, String> {
     let response = client
         .get("https://api.deepseek.com/user/balance")
         .bearer_auth(&api_key)
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await
         .map_err(|error| format!("网络请求失败：{error}"))?;
@@ -127,8 +130,7 @@ pub fn capture_usage_token(app: &tauri::AppHandle, token: String) -> Result<AppC
 }
 
 pub async fn verify_usage_token(token: &str, month: u32, year: u32) -> Result<(), String> {
-    let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-              (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
+    let ua = USER_AGENT;
     let url =
         format!("https://platform.deepseek.com/api/v0/usage/amount?month={month}&year={year}");
     let resp = reqwest::Client::new()
@@ -137,7 +139,7 @@ pub async fn verify_usage_token(token: &str, month: u32, year: u32) -> Result<()
         .header("x-app-version", "1.0.0")
         .header("Accept", "*/*")
         .header("User-Agent", ua)
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await
         .map_err(|error| format!("验证 token 失败：{error}"))?;
@@ -449,15 +451,14 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, String
         url: &str,
         token: &str,
     ) -> Result<T, String> {
-        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-                  (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
+        let ua = USER_AGENT;
         let resp = client
             .get(url)
             .bearer_auth(token)
             .header("x-app-version", "1.0.0")
             .header("Accept", "*/*")
             .header("User-Agent", ua)
-            .timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .send()
             .await
             .map_err(|error| format!("用量请求失败：{error}"))?;
@@ -479,7 +480,7 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, String
         let mut miss = 0u64;
         let mut response = 0u64;
         for entry in usage {
-            let value = entry.amount.parse::<f64>().unwrap_or(0.0).round() as u64;
+            let value = entry.amount.parse::<f64>().unwrap_or(0.0).max(0.0).min(u64::MAX as f64).round() as u64;
             match entry.kind.as_str() {
                 "REQUEST" => request = value,
                 "PROMPT_CACHE_HIT_TOKEN" => {

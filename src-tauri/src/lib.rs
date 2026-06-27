@@ -189,6 +189,9 @@ fn save_low_balance_notify(enabled: bool) -> Result<AppConfig, String> {
 
 #[tauri::command]
 fn save_low_balance_threshold(threshold: f64) -> Result<AppConfig, String> {
+    if !threshold.is_finite() || threshold < 0.0 {
+        return Err("阈值必须为非负数".to_string());
+    }
     let mut config = config::read_stored_config()?;
     config.low_balance_threshold = threshold;
     config::write_stored_config(&config)?;

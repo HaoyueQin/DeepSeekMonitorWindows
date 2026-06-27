@@ -13,6 +13,9 @@ use std::{
 
 use serde::Deserialize;
 use tokio::sync::oneshot;
+
+const POLL_TIMEOUT_SECS: u64 = 30;
+const LOG_TRUNCATE_LEN: usize = 500;
 use tauri::{Emitter, Manager};
 
 use crate::modules::types::{
@@ -284,7 +287,7 @@ pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalance
             monthly_expense: "—".to_string(),
         });
     }
-    log::info!("[MiMo] balance V1 parse failed, trying AccountOverview");
+    log::warn!("[MiMo] balance V1 parse failed, trying AccountOverview");
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -315,7 +318,7 @@ pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalance
             });
         }
     }
-    log::info!("[MiMo] balance AccountOverview parse also failed");
+    log::warn!("[MiMo] balance AccountOverview parse also failed");
 
     Err("无法解析 MiMo 余额接口返回的数据".to_string())
 }
@@ -328,9 +331,9 @@ pub async fn do_fetch_mimo_usage(
     _year: u32,
 ) -> Result<MimoUsageResult, String> {
     let overview_json = fetch_mimo_api(app, "/api/v1/usage", 15).await?;
-    log::info!(
-        "[MiMo] /api/v1/usage raw: {}",
-        &overview_json[..overview_json.len().min(2000)]
+    log::debug!(
+        "[MiMo] /api/v1/usage response ({} bytes)",
+        overview_json.len()
     );
 
     #[derive(Deserialize)]
@@ -598,7 +601,7 @@ async fn fetch_mimo_usage_detail(
             if let Ok(json) = fetch_mimo_api_with_method(app, &api_url, "POST", 10).await {
                 log::info!(
                     "[MiMo] detail fast-path response (first 500): {}",
-                    &json[..json.len().min(500)]
+                    &json[..json.len().min(LOG_TRUNCATE_LEN)]
                 );
                 if let Ok(items) = parse_detail_items(&json) {
                     if !items.is_empty() {
@@ -712,7 +715,7 @@ async fn fetch_mimo_usage_detail(
 
     let start = std::time::Instant::now();
     let mut auth_401_count = 0u32;
-    while start.elapsed() < std::time::Duration::from_secs(30) {
+    while start.elapsed() < std::time::Duration::from_secs(POLL_TIMEOUT_SECS) {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         let req_id = format!(

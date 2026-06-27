@@ -82,3 +82,18 @@ export const modelIcon = (key: string): "flash" | "pro" => {
   if (key.includes("pro")) return "pro";
   return "flash";
 };
+
+/** 通用缓存工具：成功写入 localStorage，失败时回退到缓存 */
+export async function fetchWithCache<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  try {
+    const data = await fetcher();
+    try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
+    return data;
+  } catch (error) {
+    try {
+      const cached = localStorage.getItem(key);
+      if (cached) return JSON.parse(cached) as T;
+    } catch {}
+    throw error;
+  }
+}

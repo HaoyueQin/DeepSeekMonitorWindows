@@ -51,6 +51,8 @@ fn dpapi_encrypt(plain: &[u8]) -> Result<Vec<u8>, String> {
         cb_data: 0,
         pb_data: std::ptr::null_mut(),
     };
+    // SAFETY: CryptProtectData is a Windows API that reads data_in and writes to data_out.
+    // Both structs are valid for the duration of the call. data_out.pb_data is allocated by the OS.
     let result = unsafe {
         CryptProtectData(
             &data_in,
@@ -65,9 +67,12 @@ fn dpapi_encrypt(plain: &[u8]) -> Result<Vec<u8>, String> {
     if result == 0 {
         return Err("DPAPI 加密失败".to_string());
     }
+    // SAFETY: data_out.pb_data is guaranteed valid by CryptProtectData on success;
+    // cb_data matches the allocated length. We copy to a Vec immediately.
     let encrypted = unsafe {
         std::slice::from_raw_parts(data_out.pb_data, data_out.cb_data as usize).to_vec()
     };
+    // SAFETY: data_out.pb_data was allocated by CryptProtectData; LocalFree is the correct deallocator.
     unsafe {
         LocalFree(data_out.pb_data as isize);
     }
@@ -83,6 +88,8 @@ fn dpapi_decrypt(encrypted: &[u8]) -> Result<Vec<u8>, String> {
         cb_data: 0,
         pb_data: std::ptr::null_mut(),
     };
+    // SAFETY: CryptUnprotectData reads data_in (valid encrypted bytes) and writes to data_out.
+    // Both structs are valid for the duration of the call.
     let result = unsafe {
         CryptUnprotectData(
             &data_in,
@@ -97,9 +104,12 @@ fn dpapi_decrypt(encrypted: &[u8]) -> Result<Vec<u8>, String> {
     if result == 0 {
         return Err("DPAPI 解密失败，凭据可能由其他 Windows 用户加密".to_string());
     }
+    // SAFETY: data_out.pb_data is guaranteed valid by CryptUnprotectData on success;
+    // cb_data matches the allocated length. We copy to a Vec immediately.
     let decrypted = unsafe {
         std::slice::from_raw_parts(data_out.pb_data, data_out.cb_data as usize).to_vec()
     };
+    // SAFETY: data_out.pb_data was allocated by CryptUnprotectData; LocalFree is the correct deallocator.
     unsafe {
         LocalFree(data_out.pb_data as isize);
     }

@@ -7,7 +7,7 @@ import "./styles.css";
 initLang();
 
 import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageModel, UsageDay, UsageResult, MimoBalanceData as MimoBalance, MimoUsageModel, MimoUsageDay, MimoUsageResult } from "./types";
-import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, recentUsageDays, previousMonth, modelDisplayName, modelIcon } from "./utils";
+import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, recentUsageDays, previousMonth, modelDisplayName, modelIcon, fetchWithCache } from "./utils";
 import { initLang } from "./i18n";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -49,10 +49,9 @@ function App() {
     const active = p ?? provider;
     setBalanceState("loading");
     const cmd = active === "deepseek" ? "fetch_balance" : "fetch_mimo_balance";
-    void invoke<BalanceData | MimoBalanceData>(cmd)
-      .then((data) => { setBalance(data); setBalanceState("ok"); try { localStorage.setItem(`dsm-balance-${active}`, JSON.stringify(data)); } catch {} })
+    void fetchWithCache<BalanceData | MimoBalanceData>(`dsm-balance-${active}`, () => invoke<BalanceData | MimoBalanceData>(cmd))
+      .then((data) => { setBalance(data); setBalanceState("ok"); })
       .catch((error) => {
-        try { const cached = localStorage.getItem(`dsm-balance-${active}`); if (cached) { setBalance(JSON.parse(cached)); setBalanceState("ok"); return; } } catch {}
         const message = typeof error === "string" ? error : "查询失败";
         setBalance(null); setBalanceError(message); setBalanceState(message.includes("未配置") ? "nokey" : "error");
       });
@@ -62,18 +61,16 @@ function App() {
     const active = p ?? provider;
     setUsageState("loading");
     if (active === "deepseek") {
-      void fetchCurrentUsage()
-        .then((data) => { setUsage(data); setUsageState("ok"); setUsageError(""); try { localStorage.setItem("dsm-usage-deepseek", JSON.stringify(data)); } catch {} })
+      void fetchWithCache<UsageResult>("dsm-usage-deepseek", fetchCurrentUsage)
+        .then((data) => { setUsage(data); setUsageState("ok"); setUsageError(""); })
         .catch((error) => {
-          try { const cached = localStorage.getItem("dsm-usage-deepseek"); if (cached) { setUsage(JSON.parse(cached)); setUsageState("ok"); setUsageError(""); return; } } catch {}
           const message = typeof error === "string" ? error : "查询失败"; setUsageError(message); setUsage(null); setUsageState(message.includes("未配置") ? "nokey" : "error");
         });
     } else {
       const now = new Date();
-      void invoke<MimoUsageResult>("fetch_mimo_usage", { month: now.getMonth() + 1, year: now.getFullYear() })
-        .then((data) => { setUsage(data); setUsageState("ok"); setUsageError(""); try { localStorage.setItem("dsm-usage-mimo", JSON.stringify(data)); } catch {} })
+      void fetchWithCache<MimoUsageResult>("dsm-usage-mimo", () => invoke<MimoUsageResult>("fetch_mimo_usage", { month: now.getMonth() + 1, year: now.getFullYear() }))
+        .then((data) => { setUsage(data); setUsageState("ok"); setUsageError(""); })
         .catch((error) => {
-          try { const cached = localStorage.getItem("dsm-usage-mimo"); if (cached) { setUsage(JSON.parse(cached)); setUsageState("ok"); setUsageError(""); return; } } catch {}
           const message = typeof error === "string" ? error : "查询失败"; setUsageError(message); setUsage(null); setUsageState(message.includes("未配置") ? "nokey" : "error");
         });
     }
