@@ -194,7 +194,7 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
-### v2.4.1
+### v2.4.2
 
 - **汇率修复**：修正汇率计算方向（`n * rate` 而非 `n / rate`），更新缓存 key 丢弃旧反向值，修正 sanity check。
 - **手风琴动画优化**：从 `max-height` 改为 CSS Grid `grid-template-rows`，过渡更流畅。
