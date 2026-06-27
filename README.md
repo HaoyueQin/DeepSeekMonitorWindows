@@ -194,6 +194,11 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.4.4
+
+- **检查更新修复**：检查更新失败时显示具体错误信息，不再误导性地显示"已是最新版本"。
+- **latest.json 文件名修复**：上传到 GitHub Release 的文件名从 `latest-vX.Y.Z.json` 修正为 `latest.json`，确保 updater 端点 `/releases/latest/download/latest.json` 能正确访问。
+
 ### v2.4.3
 
 - **安全加固**：f64→u64 溢出防护、unsafe 块 SAFETY 注释、敏感数据日志降级为 debug!、解析失败添加 warn! 日志。
