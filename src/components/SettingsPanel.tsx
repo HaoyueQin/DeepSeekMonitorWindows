@@ -36,7 +36,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [mimoSyncing, setMimoSyncing] = React.useState(false);
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
   const [updateInfo, setUpdateInfo] = React.useState<{ version: string; date: string; body: string } | null>(null);
-  const [updateChecked, setUpdateChecked] = React.useState(false);
+  const [updateError, setUpdateError] = React.useState("");
   const [downloading, setDownloading] = React.useState(false);
   const [downloadProgress, setDownloadProgress] = React.useState<{ downloaded: number; total: number | null } | null>(null);
   const [downloadDone, setDownloadDone] = React.useState(false);
@@ -142,18 +142,19 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
 
   const handleCheckUpdate = React.useCallback(() => {
     setCheckingUpdate(true);
-    setUpdateChecked(false);
+    setUpdateError("");
     setUpdateInfo(null);
     setDownloadDone(false);
     setDownloadProgress(null);
     void invoke<{ version: string; date: string; body: string } | null>("check_update")
       .then((info) => {
         setUpdateInfo(info);
-        setUpdateChecked(true);
+        if (!info) setUpdateError("");
       })
       .catch((err) => {
-        setUpdateChecked(true);
         setUpdateInfo(null);
+        const msg = typeof err === "string" ? err : String(err);
+        setUpdateError(msg);
         console.warn("检查更新失败:", err);
       })
       .finally(() => setCheckingUpdate(false));
@@ -484,7 +485,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           </div>
         )}
         {downloadDone && <span className="configured"><CheckCircle2 size={17} />{t('settings.update_installed')}</span>}
-        {!updateInfo && updateChecked && <span className="configured muted-status">{t('settings.latest')}</span>}
+        {!updateInfo && !updateError && !checkingUpdate && <span className="configured muted-status">{t('settings.latest')}</span>}
+        {updateError && <span className="configured" style={{ color: 'var(--orange)' }}>⚠ {updateError}</span>}
       </div>
       {updateInfo && !downloading && !downloadDone && (
         <div style={{ marginTop: 8 }}>
