@@ -194,6 +194,11 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.4.5
+
+- **MiMo 切换稳定性**：修复从 DeepSeek 切换到 MiMo 时窗口消失的偶发崩溃（去除重复 loadBalance/loadUsage 调用、ensure_mimo_webview_sync 添加 Mutex 防竞态、阻塞 sleep 改为异步）。
+- **设置页标题**：设置页左上角改为静态文本 `DeepSeek / MiMo Monitor`，主页面保留原有的点击切换功能。
+
 ### v2.4.4
 
 - **检查更新修复**：检查更新失败时显示具体错误信息，不再误导性地显示"已是最新版本"。

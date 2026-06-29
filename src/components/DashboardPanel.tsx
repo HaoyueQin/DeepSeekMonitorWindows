@@ -284,6 +284,7 @@ function ProviderSelect({ provider, onChange }: { provider: Provider; onChange: 
   return (
     <button className="provider-toggle" onClick={() => onChange(provider === "deepseek" ? "mimo" : "deepseek")}>
       {provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}
+      <span className="provider-arrow">⇄</span>
     </button>
   );
 }

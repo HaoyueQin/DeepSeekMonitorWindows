@@ -84,9 +84,8 @@ function App() {
     setUsage(null); setUsageState("loading");
     if (next === "mimo") void invoke("ensure_mimo_webview").catch(() => {});
     void invoke<AppConfig>("set_provider", { provider: next }).catch(() => {});
-    loadBalance(next);
-    loadUsage(next);
-  }, [loadBalance, loadUsage]);
+    // loadBalance/loadUsage 由 useEffect 监听 provider 变化后统一调用，避免双重调用竞态
+  }, []);
 
   const providerRef = React.useRef(provider);
   const initialLoadDone = React.useRef(false);

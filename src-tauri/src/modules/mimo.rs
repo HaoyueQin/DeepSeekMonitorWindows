@@ -77,7 +77,11 @@ pub const MIMO_INTERCEPT_JS: &str = r#"
 
 // ─── WebView 管理 ────────────────────────────────────────
 
+use std::sync::Mutex as StdMutex;
+static MIMO_WEBVIEW_LOCK: StdMutex<()> = StdMutex::new(());
+
 pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let _guard = MIMO_WEBVIEW_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(window) = app.get_webview_window("mimo-sync") {
         return Ok(window);
     }
@@ -703,7 +707,7 @@ async fn fetch_mimo_usage_detail(
         if server_start.elapsed() > std::time::Duration::from_secs(3) {
             return Err("HTTP 服务器启动超时".to_string());
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     };
 
     log::info!("[MiMo] detail: navigating to usage page (on_page_load hook active)");

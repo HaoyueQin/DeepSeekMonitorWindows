@@ -167,9 +167,24 @@ button {
   opacity: 0.8;
 }
 
+/* 设置页标题（静态，不可点击） */
+.settings-provider-title {
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  pointer-events: auto;
+  user-select: none;
+}
+
 /* 标题区子元素穿透点击，让 data-tauri-drag-region 拖拽生效 */
-.title-lockup > :not(.provider-toggle),
-.settings-header > :not(.provider-toggle),
+.title-lockup > :not(.provider-toggle):not(.settings-provider-title),
+.settings-header > :not(.provider-toggle):not(.settings-provider-title),
 .detail-hero > * {
   pointer-events: none;
 }

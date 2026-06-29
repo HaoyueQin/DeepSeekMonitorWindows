@@ -615,7 +615,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       <button className="floating-close settings-close" onClick={onBack} aria-label="返回主面板"><X size={20} /></button>
       <div className="settings-inner">
         <header className="settings-header" data-tauri-drag-region>
-          <button className="provider-toggle" onClick={() => onProviderChange(provider === "deepseek" ? "mimo" : "deepseek")}>{provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}</button>
+          <span className="settings-provider-title">DeepSeek / MiMo Monitor</span>
           <div><p>{t('settings.title')}</p></div>
         </header>
 
