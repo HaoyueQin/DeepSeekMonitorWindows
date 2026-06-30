@@ -9,6 +9,7 @@ import {
 import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
 import { fmtMoney } from "../utils";
 import { t, getLang, setLang, LANG_OPTIONS, PINNED_LANGS } from "../i18n";
+import { marked } from "marked";
 
 // ─── SettingsPanel ─────────────────────────────────────────
 export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged }: {
@@ -38,8 +39,11 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [updateInfo, setUpdateInfo] = React.useState<{ version: string; date: string; body: string } | null>(null);
   const [updateError, setUpdateError] = React.useState("");
   const [downloading, setDownloading] = React.useState(false);
-  const [downloadProgress, setDownloadProgress] = React.useState<{ downloaded: number; total: number | null } | null>(null);
+  const [downloadProgress, setDownloadProgress] = React.useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
   const [downloadDone, setDownloadDone] = React.useState(false);
+  const [changelogLoading, setChangelogLoading] = React.useState(false);
+  const [changelogHtml, setChangelogHtml] = React.useState("");
+  const [changelogError, setChangelogError] = React.useState("");
   const [activeCategory, setActiveCategory] = React.useState<string | null>(null);
   const [customDsRefresh, setCustomDsRefresh] = React.useState(false);
   const [customMimoRefresh, setCustomMimoRefresh] = React.useState(false);
@@ -145,7 +149,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     setUpdateError("");
     setUpdateInfo(null);
     setDownloadDone(false);
-    setDownloadProgress(null);
+    setDownloadProgress({ downloaded: 0, total: null });
     void invoke<{ version: string; date: string; body: string } | null>("check_update")
       .then((info) => {
         setUpdateInfo(info);
@@ -162,7 +166,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
 
   const handleInstallUpdate = React.useCallback(async () => {
     setDownloading(true);
-    setDownloadProgress(null);
+    setDownloadProgress({ downloaded: 0, total: null });
     setDownloadDone(false);
     try {
       const { Channel } = await import("@tauri-apps/api/core");
@@ -185,9 +189,52 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       console.warn("下载安装失败:", e);
       setDownloading(false);
       setDownloadDone(false);
-      setDownloadProgress(null);
+      setDownloadProgress({ downloaded: 0, total: null });
     }
   }, []);
+
+  const handleViewChangelog = React.useCallback(async () => {
+    if (changelogHtml) { setChangelogHtml(""); return; }
+    setChangelogLoading(true);
+    setChangelogError("");
+    setChangelogHtml("");
+    try {
+      const repos = [
+        { owner: "HaoyueQin", label: "" },
+        { owner: "Joyi-code", label: " (原作者)" },
+      ];
+      let html = "";
+      for (const repo of repos) {
+        try {
+          let allReleases: Array<{ tag_name: string; published_at: string; body: string }> = [];
+          let page = 1;
+          while (true) {
+            const res = await fetch(`https://api.github.com/repos/${repo.owner}/DeepSeekMonitorWindows/releases?per_page=100&page=${page}`);
+            if (!res.ok) break;
+            const pageReleases = await res.json();
+            if (!Array.isArray(pageReleases) || pageReleases.length === 0) break;
+            allReleases = allReleases.concat(pageReleases);
+            if (pageReleases.length < 100) break;
+            page++;
+          }
+          html += `<h3>${repo.owner}${repo.label}</h3>`;
+          for (const r of allReleases) {
+            const date = new Date(r.published_at).toLocaleDateString("zh-CN");
+            html += `<details><summary><strong>${r.tag_name}</strong> (${date})</summary>`;
+            html += await marked.parse(r.body || "");
+            html += `</details>`;
+          }
+        } catch (e) {
+          html += `<p><em>无法获取 ${repo.owner} 的更新日志...</em></p>`;
+        }
+      }
+      setChangelogHtml(html);
+    } catch (e) {
+      setChangelogError(`获取更新日志失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setChangelogLoading(false);
+    }
+  }, [changelogHtml]);
 
   const [lang, setLangState] = React.useState(getLang());
 
@@ -245,8 +292,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       </div>
 
       {/* MiMo Account */}
-      <div style={{ marginBottom: 16, borderLeft: '3px solid #10b981', paddingLeft: 12 }}>
-        <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#10b981' }}>MiMo</div>
+      <div style={{ marginBottom: 16, borderLeft: '3px solid #FF6900', paddingLeft: 12 }}>
+        <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#FF6900' }}>MiMo</div>
         <SettingsSection icon={<BarChart3 size={15} />} title="MiMo 登录">
           <p>通过小米账号登录 MiMo 平台，登录成功后即可查看余额和用量数据。</p>
           <div className="settings-actions"><button className="primary" onClick={startMimoSync} disabled={mimoSyncing}>{mimoSyncing ? "正在打开…" : "打开 MiMo 登录"}</button></div>
@@ -473,7 +520,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             <div style={{ height: 6, borderRadius: 3, background: 'rgba(var(--fg), 0.1)', overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 3, background: 'var(--accent, #4f8cff)',
-                width: downloadProgress?.total ? `${Math.min(100, (downloadProgress.downloaded / downloadProgress.total) * 100).toFixed(1)}%` : '30%',
+                width: downloadProgress?.total ? `${Math.min(100, (downloadProgress.downloaded / downloadProgress.total) * 100).toFixed(1)}%` : '0%',
                 transition: downloadProgress?.total ? 'width 0.2s' : 'none',
               }} />
             </div>
@@ -488,6 +535,11 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         {!updateInfo && !updateError && !checkingUpdate && <span className="configured muted-status">{t('settings.latest')}</span>}
         {updateError && <span className="configured" style={{ color: 'var(--orange)' }}>⚠ {updateError}</span>}
       </div>
+      <button className="secondary" onClick={() => { void handleViewChangelog(); }} disabled={changelogLoading} style={{ marginTop: 8 }}>
+        {changelogLoading ? "加载中…" : changelogHtml ? "收起更新日志" : "查看更新日志"}
+      </button>
+      {changelogError && <p className="muted" style={{ color: 'var(--orange)', marginTop: 4 }}>{changelogError}</p>}
+      {changelogHtml && <div className="changelog-body" style={{ marginTop: 8, maxHeight: 300, overflowY: 'auto', fontSize: '0.8em', lineHeight: 1.6, color: 'var(--text-muted)' }} dangerouslySetInnerHTML={{ __html: changelogHtml }} />}
       {updateInfo && !downloading && !downloadDone && (
         <div style={{ marginTop: 8 }}>
           <p className="muted">v{updateInfo.version} {updateInfo.date ? `(${updateInfo.date})` : ""}</p>
@@ -643,10 +695,10 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
               <div style={{
                 display: 'grid',
                 gridTemplateRows: activeCategory === cat.key ? '1fr' : '0fr',
-                transition: 'grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                transition: 'grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
                 paddingLeft: 8, paddingRight: 8,
               }}>
-                <div style={{ overflow: activeCategory === cat.key ? 'visible' : 'hidden', minHeight: 0 }}>
+                <div style={{ overflow: 'hidden', minHeight: 0 }}>
                   {categoryContent[cat.key]}
                 </div>
               </div>
