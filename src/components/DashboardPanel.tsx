@@ -189,7 +189,7 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
                     <span className="bar-tooltip-row"><i className="dot miss" />输入（未命中缓存）<strong>{fmtInt(point.miss)} tokens</strong></span>
                     <span className="bar-tooltip-row"><i className="dot response" />输出<strong>{fmtInt(point.response)} tokens</strong></span>
                     <span className="bar-tooltip-row" style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(var(--fg), 0.1)' }}>缓存命中 <strong>{point.hit + point.miss > 0 ? ((point.hit / (point.hit + point.miss)) * 100).toFixed(3) : "0"}%</strong></span>
-                    <span className="bar-tooltip-row">单价 <strong>
+                    <span className="bar-tooltip-row">平均单价 <strong>
                       {point.cost > 0 && point.total > 0
                         ? efficiencyUnit === "token_per_currency"
                           ? `${(point.total / point.cost / 1_000_000).toFixed(2)} MT/${sym}`

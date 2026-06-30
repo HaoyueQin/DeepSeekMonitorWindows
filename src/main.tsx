@@ -158,7 +158,7 @@ function App() {
         />
       )}
       {view === "detail" && (
-        <ModelDetailPanel model={model} usage={usage} usageState={usageState} onBack={() => setView("dashboard")} provider={provider} currency={currency} exchangeRate={exchangeRate} />
+        <ModelDetailPanel model={model} usage={usage} usageState={usageState} onBack={() => setView("dashboard")} provider={provider} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
       )}
     </div>
   );
