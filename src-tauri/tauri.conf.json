@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DeepSeekMonitorWindows",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "identifier": "com.deepseek.monitor.windows",
   "build": {
     "frontendDist": "../dist",
@@ -30,7 +30,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' https://asset.localhost https://tauri.localhost data:; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' https://asset.localhost https://tauri.localhost data:; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost https://api.github.com"
     }
   },
   "bundle": {
