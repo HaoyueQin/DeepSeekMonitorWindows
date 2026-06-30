@@ -107,11 +107,14 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
 }
 
 // ─── UsageChart ────────────────────────────────────────────
-export function UsageChart({ usage, state, error, provider }: {
+export function UsageChart({ usage, state, error, provider, currency, exchangeRate, efficiencyUnit }: {
   usage: UsageResult | MimoUsageResult | null;
   state: BalanceState;
   error: string;
   provider: Provider;
+  currency?: "cny" | "usd";
+  exchangeRate?: number;
+  efficiencyUnit?: "token_per_currency" | "currency_per_token";
 }) {
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
   const [weekOffset, setWeekOffset] = React.useState(0);
@@ -131,18 +134,18 @@ export function UsageChart({ usage, state, error, provider }: {
   const points = days.map((date) => {
     if (isDeepSeek) {
       const d = dsMap.get(date);
-      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0 };
+      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0, cost: 0 };
       const hit = d.flashCacheHit + d.proCacheHit;
       const miss = d.flashCacheMiss + d.proCacheMiss;
       const response = d.flashResponse + d.proResponse;
-      return { date, hit, miss, response, total: hit + miss + response };
+      return { date, hit, miss, response, total: hit + miss + response, cost: d.totalCost };
     } else {
       const d = mimoMap.get(date);
-      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0 };
+      if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0, cost: 0 };
       const hit = d.models.reduce((s, m) => s + m.cacheHitTokens, 0);
       const miss = d.models.reduce((s, m) => s + m.cacheMissTokens, 0);
       const response = d.models.reduce((s, m) => s + m.responseTokens, 0);
-      return { date, hit, miss, response, total: hit + miss + response };
+      return { date, hit, miss, response, total: hit + miss + response, cost: d.totalCost };
     }
   });
 
@@ -151,6 +154,14 @@ export function UsageChart({ usage, state, error, provider }: {
   const sumMiss = points.reduce((s, p) => s + p.miss, 0);
   const sumTotal = points.reduce((s, p) => s + p.total, 0);
   const hitRate = sumHit + sumMiss > 0 ? ((sumHit / (sumHit + sumMiss)) * 100).toFixed(3) : "0";
+  const sym = currency === "usd" ? "$" : "¥";
+  const sumCost = points.reduce((s, p) => s + p.cost, 0);
+  const displayCost = currency === "usd" && exchangeRate && exchangeRate > 0 ? sumCost * exchangeRate : sumCost;
+  const ratio = sumCost > 0
+    ? efficiencyUnit === "token_per_currency"
+      ? `${(sumTotal / displayCost / 1_000_000).toFixed(2)} MT/${sym}`
+      : `${(displayCost * 1_000_000 / sumTotal).toFixed(3)} ${sym}/MT`
+    : "—";
   const canGoForward = weekOffset < 0;
   const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
   const placeholder = state === "loading" ? "查询中…" : state === "nokey" ? "未配置用量 Token" : state === "error" ? error : "暂无数据";
@@ -164,7 +175,7 @@ export function UsageChart({ usage, state, error, provider }: {
           <span className="chart-nav-label">{weekLabel}</span>
           <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">›</button>
         </div>
-        <span className="chart-total">{state === "ok" ? `命中率 ${hitRate}% · 合计 ${fmtTokensShort(sumTotal)}` : "—"}</span>
+        <span className="chart-total">{state === "ok" ? `${hitRate}% · ${fmtTokensShort(sumTotal)} · ${ratio}` : "—"}</span>
       </div>
       {state === "ok" && points.length > 0 ? (
         <>
@@ -177,6 +188,14 @@ export function UsageChart({ usage, state, error, provider }: {
                     <span className="bar-tooltip-row"><i className="dot hit" />输入（命中缓存）<strong>{fmtInt(point.hit)} tokens</strong></span>
                     <span className="bar-tooltip-row"><i className="dot miss" />输入（未命中缓存）<strong>{fmtInt(point.miss)} tokens</strong></span>
                     <span className="bar-tooltip-row"><i className="dot response" />输出<strong>{fmtInt(point.response)} tokens</strong></span>
+                    <span className="bar-tooltip-row" style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(var(--fg), 0.1)' }}>缓存命中 <strong>{point.hit + point.miss > 0 ? ((point.hit / (point.hit + point.miss)) * 100).toFixed(3) : "0"}%</strong></span>
+                    <span className="bar-tooltip-row">单价 <strong>
+                      {point.cost > 0 && point.total > 0
+                        ? efficiencyUnit === "token_per_currency"
+                          ? `${(point.total / point.cost / 1_000_000).toFixed(2)} MT/${sym}`
+                          : `${(point.cost * 1_000_000 / point.total).toFixed(3)} ${sym}/MT`
+                        : "—"}
+                    </strong></span>
                   </div>
                 )}
                 <span className="bar-value">{point.total > 0 ? fmtTokensShort(point.total) : "0"}</span>
@@ -207,6 +226,7 @@ export function UsageChart({ usage, state, error, provider }: {
 }
 
 // ─── MiMo Default Models (module-level constant) ──────────
+// modelDisplayName(m.key) 在渲染时统一获取名称，此处的 name 仅用于类型满足
 const MIMO_DEFAULT_MODELS: MimoUsageModel[] = [
   { key: "mimo-v2.5", name: "MiMo-V2.5", totalTokens: 0, requestCount: 0, cacheHitTokens: 0, cacheMissTokens: 0, responseTokens: 0, cost: 0 },
   { key: "mimo-v2.5-pro", name: "MiMo-V2.5-Pro", totalTokens: 0, requestCount: 0, cacheHitTokens: 0, cacheMissTokens: 0, responseTokens: 0, cost: 0 },
@@ -257,7 +277,7 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
         <div className="header-actions">
           <button aria-label="刷新" onClick={onRefresh}><RefreshCw size={22} /></button>
           <div className="skin-menu-wrap">
-            <button aria-label="Toggle theme" className="skin-toggle" title="切换主题" onClick={() => { const cur = localStorage.getItem("ui-theme") || "light"; const next = cur === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", next); localStorage.setItem("ui-theme", next); void invoke<AppConfig>("save_theme", { theme: next }).catch(() => {}); }}><Shirt size={21} /></button>
+            <button aria-label="Toggle theme" className="skin-toggle" title="切换主题" onClick={() => { const cur = localStorage.getItem("ui-theme") || "light"; const next = cur === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", next); localStorage.setItem("ui-theme", next); void invoke<AppConfig>("save_theme", { theme: next }).catch(console.warn); }}><Shirt size={21} /></button>
           </div>
           <button aria-label="设置" onClick={onSettings}><Settings size={23} /></button>
           <button aria-label="关闭" onClick={onClose}><X size={25} /></button>
@@ -274,7 +294,7 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
           <UsageRow key={m.key} modelKey={modelIcon(m.key)} data={{ ...m, key: modelIcon(m.key) }} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(m.key)} modelDisplay={modelDisplayName(m.key)} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
         ))}
       </div>
-      <UsageChart usage={usage} state={usageState} error={usageError} provider={provider} />
+      <UsageChart usage={usage} state={usageState} error={usageError} provider={provider} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
     </section>
   );
 }

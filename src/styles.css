@@ -183,10 +183,16 @@ button {
 }
 
 /* 标题区子元素穿透点击，让 data-tauri-drag-region 拖拽生效 */
-.title-lockup > :not(.provider-toggle):not(.settings-provider-title),
-.settings-header > :not(.provider-toggle):not(.settings-provider-title),
+.title-lockup > *,
+.settings-header > *,
 .detail-hero > * {
   pointer-events: none;
+}
+.title-lockup > .provider-toggle,
+.settings-header > .provider-toggle,
+.title-lockup > .settings-provider-title,
+.settings-header > .settings-provider-title {
+  pointer-events: auto;
 }
 
 .brand-icon {
@@ -1047,8 +1053,8 @@ button:disabled {
   grid-template-rows: 18px 1fr 20px; /* 柱顶数值 / 柱子区 / 底部日期 */
   justify-items: center;
   align-items: stretch;
+  position: relative;
 }
-
 .detail-bar-column span {
   color: rgba(var(--fg), 0.68);
   max-width: 100%;
@@ -1097,10 +1103,6 @@ button:disabled {
 }
 
 /* ---------- 磨玻璃浮窗 ---------- */
-.detail-bar-column {
-  position: relative;
-}
-
 .bar-tooltip {
   position: absolute;
   bottom: 100%;

@@ -7,26 +7,11 @@ import "./styles.css";
 initLang();
 
 import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageModel, UsageDay, UsageResult, MimoBalanceData as MimoBalance, MimoUsageModel, MimoUsageDay, MimoUsageResult } from "./types";
-import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, recentUsageDays, previousMonth, modelDisplayName, modelIcon, fetchWithCache } from "./utils";
+import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, recentUsageDays, previousMonth, modelDisplayName, modelIcon, fetchWithCache, fetchCurrentUsageCrossMonth } from "./utils";
 import { initLang } from "./i18n";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ModelDetailPanel } from "./components/ModelDetailPanel";
-
-const fetchMonthUsage = (month: number, year: number) => {
-  return invoke<UsageResult>("fetch_usage", { month, year });
-};
-const fetchCurrentUsage = async () => {
-  const now = new Date();
-  const current = await fetchMonthUsage(now.getMonth() + 1, now.getFullYear());
-  const needsPreviousMonth = addDays(now, -6).getMonth() !== now.getMonth();
-  if (!needsPreviousMonth) return current;
-  try {
-    const previous = previousMonth(now);
-    const previousUsage = await fetchMonthUsage(previous.month, previous.year);
-    return { ...current, days: [...previousUsage.days, ...current.days] };
-  } catch { return current; }
-};
 
 // ─── App ───────────────────────────────────────────────────
 function App() {
@@ -61,7 +46,7 @@ function App() {
     const active = p ?? provider;
     setUsageState("loading");
     if (active === "deepseek") {
-      void fetchWithCache<UsageResult>("dsm-usage-deepseek", fetchCurrentUsage)
+      void fetchWithCache<UsageResult>("dsm-usage-deepseek", fetchCurrentUsageCrossMonth)
         .then((data) => { setUsage(data); setUsageState("ok"); setUsageError(""); })
         .catch((error) => {
           const message = typeof error === "string" ? error : "查询失败"; setUsageError(message); setUsage(null); setUsageState(message.includes("未配置") ? "nokey" : "error");
@@ -82,8 +67,8 @@ function App() {
     setProviderState(next);
     setBalance(null); setBalanceState("loading");
     setUsage(null); setUsageState("loading");
-    if (next === "mimo") void invoke("ensure_mimo_webview").catch(() => {});
-    void invoke<AppConfig>("set_provider", { provider: next }).catch(() => {});
+    if (next === "mimo") void invoke("ensure_mimo_webview").catch(console.warn);
+    void invoke<AppConfig>("set_provider", { provider: next }).catch(console.warn);
     // loadBalance/loadUsage 由 useEffect 监听 provider 变化后统一调用，避免双重调用竞态
   }, []);
 

@@ -5,10 +5,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicU16, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 use serde::Deserialize;
@@ -81,14 +78,20 @@ use std::sync::Mutex as StdMutex;
 static MIMO_WEBVIEW_LOCK: StdMutex<()> = StdMutex::new(());
 
 pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
-    let _guard = MIMO_WEBVIEW_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // 快速路径：窗口已存在，无需持锁
+    if let Some(window) = app.get_webview_window("mimo-sync") {
+        return Ok(window);
+    }
+    // 仅在创建窗口时持锁
+    let _guard = MIMO_WEBVIEW_LOCK.lock().unwrap();
+    // 双重检查：等锁期间可能已被另一线程创建
     if let Some(window) = app.get_webview_window("mimo-sync") {
         return Ok(window);
     }
     let url = tauri::WebviewUrl::External(
         "https://platform.xiaomimimo.com/console/balance"
             .parse()
-            .unwrap(),
+            .map_err(|_| "无效 URL".to_string())?,
     );
     tauri::WebviewWindowBuilder::new(app, "mimo-sync", url)
         .title("小米 MiMo 控制台")
@@ -639,76 +642,8 @@ async fn fetch_mimo_usage_detail(
 
     let window = ensure_mimo_webview_sync(app)?;
 
-    // 启动本地 HTTP 服务器
-    let poll_port = Arc::new(AtomicU16::new(0));
-    let poll_port_clone = Arc::clone(&poll_port);
-    let poll_map = {
-        let state =
-            app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
-        Arc::clone(&state)
-    };
-    let _poll_server = std::thread::spawn(move || {
-        use tiny_http::{Header, Method, Response, Server};
-        let server = match Server::http("127.0.0.1:0") {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        if let Some(addr) = server.server_addr().to_ip() {
-            poll_port_clone.store(addr.port(), Ordering::SeqCst);
-        } else {
-            return;
-        }
-        while let Ok(Some(mut request)) =
-            server.recv_timeout(std::time::Duration::from_secs(20))
-        {
-            if *request.method() == Method::Options {
-                let response = Response::from_string(String::new())
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..])
-                            .unwrap(),
-                    )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"POST, OPTIONS"[..])
-                            .unwrap(),
-                    )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type"[..])
-                            .unwrap(),
-                    );
-                let _ = request.respond(response);
-            } else {
-                let mut body = String::new();
-                let _ = request.as_reader().read_to_string(&mut body);
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
-                    if let (Some(rid), Some(data)) = (
-                        parsed.get("reqId").and_then(|v| v.as_str()),
-                        parsed.get("data").and_then(|v| v.as_str()),
-                    ) {
-                        let mut map = poll_map.lock().unwrap();
-                        if let Some(tx) = map.remove(rid) {
-                            let _ = tx.send(data.to_string());
-                        }
-                    }
-                }
-                let response = Response::from_string("OK").with_header(
-                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..]).unwrap(),
-                );
-                let _ = request.respond(response);
-            }
-        }
-    });
-
-    let server_start = std::time::Instant::now();
-    let poll_port_val = loop {
-        let p = poll_port.load(Ordering::SeqCst);
-        if p != 0 {
-            break p;
-        }
-        if server_start.elapsed() > std::time::Duration::from_secs(3) {
-            return Err("HTTP 服务器启动超时".to_string());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    };
+    // 复用主 CallbackServer 端口，不再创建独立 HTTP 服务器
+    let cb_port = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
 
     log::info!("[MiMo] detail: navigating to usage page (on_page_load hook active)");
     let _ = window.eval("window.__mimo_detail = null; window.__mimo_ph = null;");
@@ -749,7 +684,7 @@ async fn fetch_mimo_usage_detail(
                     fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:'WAITING'}})}});
                 }}
             }})()}}catch(e){{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:'EXC:'+e.message}})}});}}"#,
-            port = poll_port_val, req_id = req_id,
+            port = cb_port, req_id = req_id,
         );
         let _ = window.eval(&check_js);
 
@@ -800,7 +735,7 @@ async fn fetch_mimo_usage_detail(
                         }
                         let _ = window.eval(&format!(
                             r#"try{{var p=window.__mimo_ph||localStorage.getItem('mimo_platform_ph')||'';fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{ph_req}',data:p}})}});}}catch(e){{}}"#,
-                            port = poll_port_val, ph_req = ph_req,
+                            port = cb_port, ph_req = ph_req,
                         ));
                         if let Ok(Ok(ph_val)) =
                             tokio::time::timeout(std::time::Duration::from_secs(2), prx).await

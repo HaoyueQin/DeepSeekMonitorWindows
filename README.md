@@ -194,6 +194,18 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.5.0
+
+- **设置页UI增强**：字体透明度和玻璃透明度独立调优，设置页视觉效果更清晰。
+- **更新日志**：设置页新增"查看更新日志"功能，通过 GitHub API 分页拉取全部版本记录，marked 渲染 Markdown，默认折叠按版本展开。
+- **MiMo 颜色**：设置页 MiMo 区域标识色从绿色改为小米品牌橙色 `#FF6900`。
+- **手风琴动画优化**：展开/折叠过渡从 0.3s 微调到 0.35s，更流畅自然。
+- **下载进度条修复**：消除点击下载时进度条先跳到 30% 再回 0% 的视觉跳动。
+- **图表增强**：缓存命中明细右上角新增效率指标（MT/¥ 或 ¥/MT）；悬浮 tooltip 增加每日命中率和单价显示。
+- **Bug 修复**：自定义刷新间隔不再被静默重置为 60 秒；MimoDetailCache 空缓存状态修正；Mutex 双检锁优化、去中毒绕过；独立 poll server 改为复用主 CallbackServer，消除线程泄漏；`start_usage_title_watcher` 超时从 30 分钟缩短到 15 分钟。
+- **代码质量**：i18n 精简为 zh/en 双语；提取公用 `fetchCurrentUsageCrossMonth`；消除重复动态 import；`modelIcon` 支持 MiMo 模型；`:not()` 选择器改为白名单；`.detail-bar-column` 三重定义合并。
+- **错误处理**：关键 Tauri 命令失败时添加 `console.warn`；`url.parse().unwrap()` 替换为 `map_err`。
+
 ### v2.4.5
 
 - **MiMo 切换稳定性**：修复从 DeepSeek 切换到 MiMo 时窗口消失的偶发崩溃（去除重复 loadBalance/loadUsage 调用、ensure_mimo_webview_sync 添加 Mutex 防竞态、阻塞 sleep 改为异步）。

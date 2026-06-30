@@ -216,7 +216,7 @@ pub fn find_webview_cached_usage_token() -> Option<String> {
 pub fn start_usage_title_watcher(app: tauri::AppHandle) {
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(3));
-        for _ in 0..1200 {
+        for _i in 0..600 {
             if let Some(token) = find_webview_cached_usage_token() {
                 let _ = capture_usage_token(&app, token);
                 return;
@@ -350,7 +350,7 @@ pub fn start_usage_sync(app: &tauri::AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let url = tauri::WebviewUrl::External("https://platform.deepseek.com".parse().unwrap());
+    let url = tauri::WebviewUrl::External("https://platform.deepseek.com".parse().map_err(|_| "无效 URL".to_string())?);
     tauri::WebviewWindowBuilder::new(app, "login-sync", url)
         .title("DeepSeek 账号登录")
         .inner_size(480.0, 720.0)

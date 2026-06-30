@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -7,8 +8,8 @@ import {
   User, Monitor, Bell, Palette, Globe, ChevronRight, ChevronLeft,
 } from "lucide-react";
 import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
-import { fmtMoney } from "../utils";
-import { t, getLang, setLang, LANG_OPTIONS, PINNED_LANGS } from "../i18n";
+import { fmtMoney, fetchCurrentUsageCrossMonth } from "../utils";
+import { t, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
 
 // ─── SettingsPanel ─────────────────────────────────────────
@@ -61,19 +62,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
-  const fetchCurrentUsage = React.useCallback(async () => {
-    const { invoke: inv } = await import("@tauri-apps/api/core");
-    const { addDays, previousMonth } = await import("../utils");
-    const now = new Date();
-    const current: UsageResult = await inv("fetch_usage", { month: now.getMonth() + 1, year: now.getFullYear() });
-    const needsPrev = addDays(now, -6).getMonth() !== now.getMonth();
-    if (!needsPrev) return current;
-    try {
-      const prev = previousMonth(now);
-      const prevUsage: UsageResult = await inv("fetch_usage", { month: prev.month, year: prev.year });
-      return { ...current, days: [...prevUsage.days, ...current.days] };
-    } catch { return current; }
-  }, []);
+  const fetchCurrentUsage = React.useCallback(() => fetchCurrentUsageCrossMonth(), []);
 
   const refreshUsageAfterToken = React.useCallback((prefix: string) => {
     setUsageStatus(`${prefix}，正在刷新用量数据…`);
@@ -240,8 +229,15 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
 
   const [langOpen, setLangOpen] = React.useState(false);
   const langRef = React.useRef<HTMLDivElement>(null);
+  const langBtnRef = React.useRef<HTMLButtonElement>(null);
+  const langDropdownRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
-    const handler = (e: MouseEvent) => { if (langRef.current && !langRef.current.contains(e.target as Node)) setLangOpen(false); };
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if ((langRef.current && langRef.current.contains(t)) ||
+          (langDropdownRef.current && langDropdownRef.current.contains(t))) return;
+      setLangOpen(false);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
@@ -380,6 +376,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           <p style={{ margin: 0 }}>{t('settings.language_desc')}</p>
           <div className="lang-select" ref={langRef} style={{ position: 'relative', flexShrink: 0 }}>
             <button
+              ref={langBtnRef}
               className="lang-select-btn"
               onClick={() => setLangOpen(!langOpen)}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', border: '1px solid rgba(var(--fg), 0.2)', borderRadius: 6, background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: '0.85em' }}
@@ -387,26 +384,28 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
               <span>{currentLangLabel}</span>
               <span style={{ fontSize: '0.7em', opacity: 0.6 }}>▼</span>
             </button>
-            {langOpen && (
-              <div className="lang-dropdown" style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: 'var(--glass-tooltip-tint)', border: '1px solid rgba(var(--fg), 0.15)', borderRadius: 8, overflow: 'hidden', zIndex: 100, backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', minWidth: 160, maxHeight: 380, overflowY: 'auto' }}>
-                {PINNED_LANGS.map((code) => {
-                  const opt = LANG_OPTIONS.find(o => o.code === code);
-                  if (!opt) return null;
-                  return (
-                    <button key={'pinned-' + code} onClick={() => { setLang(code); setLangState(code); setLangOpen(false); }}
-                      style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', background: lang === code ? 'rgba(var(--fg), 0.1)' : 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: '0.85em' }}>
-                      {opt.label}
-                    </button>
-                  );
-                })}
-                <div style={{ borderTop: '1px solid rgba(var(--fg), 0.12)', margin: '2px 8px' }} />
+            {langOpen && createPortal(
+              <div ref={langDropdownRef} className="lang-dropdown" style={{
+                position: 'fixed',
+                top: (langBtnRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                right: window.innerWidth - (langBtnRef.current?.getBoundingClientRect().right ?? 0),
+                background: 'var(--glass-tooltip-tint)',
+                border: '1px solid rgba(var(--fg), 0.15)',
+                borderRadius: 8,
+                overflow: 'hidden',
+                zIndex: 9999,
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                minWidth: 160,
+              }}>
                 {LANG_OPTIONS.map((opt) => (
                   <button key={opt.code} onClick={() => { setLang(opt.code); setLangState(opt.code); setLangOpen(false); }}
                     style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', background: lang === opt.code ? 'rgba(var(--fg), 0.1)' : 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: '0.85em' }}>
                     {opt.label}
                   </button>
                 ))}
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>

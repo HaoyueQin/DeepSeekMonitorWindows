@@ -165,8 +165,9 @@ pub fn config_path() -> Result<PathBuf, String> {
 
 fn normalize_refresh_interval_seconds(value: u64) -> u64 {
     match value {
-        60 | 300 | 1800 | 3600 => value,
-        _ => 60,
+        0 => 60,
+        v if v < 60 => 60,
+        _ => value,
     }
 }
 
@@ -186,8 +187,11 @@ mod tests {
     fn normalize_invalid() {
         assert_eq!(normalize_refresh_interval_seconds(0), 60);
         assert_eq!(normalize_refresh_interval_seconds(1), 60);
-        assert_eq!(normalize_refresh_interval_seconds(999), 60);
-        assert_eq!(normalize_refresh_interval_seconds(7200), 60);
+        assert_eq!(normalize_refresh_interval_seconds(59), 60);
+        // 自定义值应保留
+        assert_eq!(normalize_refresh_interval_seconds(120), 120);
+        assert_eq!(normalize_refresh_interval_seconds(999), 999);
+        assert_eq!(normalize_refresh_interval_seconds(7200), 7200);
     }
 
     #[test]

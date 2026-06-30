@@ -225,7 +225,7 @@ impl MimoDetailCache {
     }
     pub fn get(&self, max_age: std::time::Duration) -> Option<Vec<UsageDetailItem>> {
         if self.in_progress {
-            return Some(vec![]);
+            return None;
         }
         self.items
             .as_ref()
