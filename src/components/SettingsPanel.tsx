@@ -8,7 +8,7 @@ import {
   User, Monitor, Bell, Palette, Globe, ChevronRight, ChevronLeft,
 } from "lucide-react";
 import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
-import { fmtMoney, fetchCurrentUsageCrossMonth } from "../utils";
+import { fmtMoney, addDays, previousMonth } from "../utils";
 import { t, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
 
@@ -62,7 +62,17 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
-  const fetchCurrentUsage = React.useCallback(() => fetchCurrentUsageCrossMonth(), []);
+  const fetchCurrentUsage = React.useCallback(async () => {
+    const now = new Date();
+    const current: UsageResult = await invoke("fetch_usage", { month: now.getMonth() + 1, year: now.getFullYear() });
+    const needsPrev = addDays(now, -6).getMonth() !== now.getMonth();
+    if (!needsPrev) return current;
+    try {
+      const prev = previousMonth(now);
+      const prevUsage: UsageResult = await invoke("fetch_usage", { month: prev.month, year: prev.year });
+      return { ...current, days: [...prevUsage.days, ...current.days] };
+    } catch { return current; }
+  }, []);
 
   const refreshUsageAfterToken = React.useCallback((prefix: string) => {
     setUsageStatus(`${prefix}，正在刷新用量数据…`);

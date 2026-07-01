@@ -1,5 +1,4 @@
-import type { UsageDay, UsageResult } from "./types";
-import { invoke } from "@tauri-apps/api/core";
+import type { UsageDay } from "./types";
 
 export const REFRESH_OPTIONS = [
   { label: "1 分钟", value: 60 },
@@ -100,15 +99,3 @@ export async function fetchWithCache<T>(key: string, fetcher: () => Promise<T>):
   }
 }
 
-/** 跨月边界用量查询：如果最近 7 天跨越了月份，合并两个月数据 */
-export async function fetchCurrentUsageCrossMonth(): Promise<UsageResult> {
-  const now = new Date();
-  const current = await invoke<UsageResult>("fetch_usage", { month: now.getMonth() + 1, year: now.getFullYear() });
-  const needsPrev = addDays(now, -6).getMonth() !== now.getMonth();
-  if (!needsPrev) return current;
-  try {
-    const prev = previousMonth(now);
-    const prevUsage = await invoke<UsageResult>("fetch_usage", { month: prev.month, year: prev.year });
-    return { ...current, days: [...prevUsage.days, ...current.days] };
-  } catch { return current; }
-}

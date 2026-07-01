@@ -125,7 +125,7 @@ DeepSeekMonitorWindows/
 │   ├── main.tsx                 # App 入口、全局状态、路由
 │   ├── types.ts                 # TypeScript 类型定义
 │   ├── utils.ts                 # 工具函数（格式化、日期）
-│   ├── i18n.ts                  # 17 种语言国际化
+│   ├── i18n.ts                  # 中英双语国际化
 │   ├── styles.css               # Windows 桌面 UI 样式
 │   └── components/
 │       ├── DashboardPanel.tsx   # 主面板（余额、用量、图表）
@@ -194,6 +194,13 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.5.3
+
+- **稳定性修复**：DeepSeek 用量查询恢复为组件内 `invoke` 调用，修复 v2.5.0 中提取公用函数导致的生产环境数据加载失败。
+- **安全加固**：回调服务器启动失败不再 panic，改为优雅降级；CSP 白名单新增 `open.er-api.com`，修复汇率 API 在生产环境被拦截。
+- **代码清理**：去除 main.tsx 冗余 import 和 `MimoBalanceData` 重复导入。
+- **文档更新**：README 中 i18n 相关描述同步更新为 zh/en 双语。
+
 ### v2.5.2
 
 - **模型详情页增强**：标题下方新增该模型的平均命中率和平均单价；每日柱状图悬浮 tooltip 新增缓存命中率和平均单价。
@@ -212,7 +219,7 @@ Rust 后端依赖：
 - **下载进度条修复**：消除点击下载时进度条先跳到 30% 再回 0% 的视觉跳动。
 - **图表增强**：缓存命中明细右上角新增效率指标（MT/¥ 或 ¥/MT）；悬浮 tooltip 增加每日命中率和单价显示。
 - **Bug 修复**：自定义刷新间隔不再被静默重置为 60 秒；MimoDetailCache 空缓存状态修正；Mutex 双检锁优化、去中毒绕过；独立 poll server 改为复用主 CallbackServer，消除线程泄漏；`start_usage_title_watcher` 超时从 30 分钟缩短到 15 分钟。
-- **代码质量**：i18n 精简为 zh/en 双语；提取公用 `fetchCurrentUsageCrossMonth`；消除重复动态 import；`modelIcon` 支持 MiMo 模型；`:not()` 选择器改为白名单；`.detail-bar-column` 三重定义合并。
+- **代码质量**：i18n 精简为 zh/en 双语；消除重复动态 import；`modelIcon` 支持 MiMo 模型；`:not()` 选择器改为白名单；`.detail-bar-column` 三重定义合并。
 - **错误处理**：关键 Tauri 命令失败时添加 `console.warn`；`url.parse().unwrap()` 替换为 `map_err`。
 
 ### v2.4.5
@@ -264,7 +271,7 @@ Rust 后端依赖：
 
 ### v2.3.0
 
-- **i18n 国际化**：支持 17 种语言（简体中文、English、العربية、Deutsch、Español、Français、हिन्दी、Italiano、日本語、한국어、Nederlands、Polski、Português、Русский、ไทย、Türkçe、Tiếng Việt）。设置页提供语言下拉选择器，zh/en 固定在顶部，其余按 Unicode 排序。
+- **i18n 国际化**：支持 17 种语言。v2.5.0 起精简为 zh/en 双语，其余语言已移除。
 - **Windows 余额通知**：余额低于阈值时弹出 Windows toast 通知（默认关闭，可设置阈值）。
 - **Tauri 自动更新**：集成 `tauri-plugin-updater`，支持签名验证的自动更新。
 - **窗口状态记忆**：保存窗口大小和位置，下次启动自动恢复。

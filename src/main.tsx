@@ -4,14 +4,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import "./styles.css";
-initLang();
 
-import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageModel, UsageDay, UsageResult, MimoBalanceData as MimoBalance, MimoUsageModel, MimoUsageDay, MimoUsageResult } from "./types";
-import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, recentUsageDays, previousMonth, modelDisplayName, modelIcon, fetchWithCache, fetchCurrentUsageCrossMonth } from "./utils";
+import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "./types";
+import { addDays, previousMonth, fetchWithCache } from "./utils";
 import { initLang } from "./i18n";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ModelDetailPanel } from "./components/ModelDetailPanel";
+
+initLang();
 
 // ─── App ───────────────────────────────────────────────────
 function App() {
@@ -46,7 +47,16 @@ function App() {
     const active = p ?? provider;
     setUsageState("loading");
     if (active === "deepseek") {
-      void fetchWithCache<UsageResult>("dsm-usage-deepseek", fetchCurrentUsageCrossMonth)
+      void fetchWithCache<UsageResult>("dsm-usage-deepseek", () => invoke<UsageResult>("fetch_usage", { month: new Date().getMonth() + 1, year: new Date().getFullYear() }).then(async (current) => {
+        const now = new Date();
+        const needsPrev = addDays(now, -6).getMonth() !== now.getMonth();
+        if (!needsPrev) return current;
+        try {
+          const prev = previousMonth(now);
+          const prevUsage = await invoke<UsageResult>("fetch_usage", { month: prev.month, year: prev.year });
+          return { ...current, days: [...prevUsage.days, ...current.days] };
+        } catch { return current; }
+      }))
         .then((data) => { setUsage(data); setUsageState("ok"); setUsageError(""); })
         .catch((error) => {
           const message = typeof error === "string" ? error : "查询失败"; setUsageError(message); setUsage(null); setUsageState(message.includes("未配置") ? "nokey" : "error");

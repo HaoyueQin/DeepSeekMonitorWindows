@@ -27,10 +27,10 @@ struct CallbackServer {
 }
 
 impl CallbackServer {
-    fn start(shared_map: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>) -> Self {
+    fn start(shared_map: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>) -> std::io::Result<Self> {
         use tiny_http::{Header, Method, Response, Server};
-        let server = Server::http("127.0.0.1:0").expect("无法启动回调服务器");
-        let port = server.server_addr().to_ip().unwrap().port();
+        let server = Server::http("127.0.0.1:0").map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, format!("无法启动回调服务器：{e}")))?;
+        let port = server.server_addr().to_ip().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "回调服务器地址无效"))?.port();
         std::thread::spawn(move || {
             while let Ok(Some(mut request)) =
                 server.recv_timeout(std::time::Duration::from_secs(3600))
@@ -77,7 +77,7 @@ impl CallbackServer {
                 }
             }
         });
-        CallbackServer { port }
+                Ok(CallbackServer { port })
     }
 }
 
@@ -532,7 +532,7 @@ pub fn run() {
                 .state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>()
                 .inner()
                 .clone();
-            let cb_server = CallbackServer::start(shared_map);
+            let cb_server = CallbackServer::start(shared_map)?;
             *app.state::<Mutex<CallbackServerPort>>().lock().unwrap() =
                 CallbackServerPort(cb_server.port);
             app.manage(Mutex::new(cb_server));
