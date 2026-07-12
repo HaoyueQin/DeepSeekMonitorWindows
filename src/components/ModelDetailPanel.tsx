@@ -92,6 +92,8 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
 
   const rangeText = `${mmdd(points[0]?.date ?? "")} - ${mmdd(points[points.length - 1]?.date ?? "")}`;
   const canGoForward = weekOffset < 0;
+  const MAX_WEEKS_BACK = 52;
+  const canGoBack = weekOffset > -(MAX_WEEKS_BACK + 1);
   const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
 
   return (
@@ -111,7 +113,7 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
         <div className="detail-chart-head">
           <div><h2>按日 Token 消耗</h2><span>{rangeText}</span></div>
           <div className="chart-nav">
-            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} title="上一周">‹</button>
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title="上一周">‹</button>
             <span className="chart-nav-label">{weekLabel}</span>
             <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">›</button>
           </div>

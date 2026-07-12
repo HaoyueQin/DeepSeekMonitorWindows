@@ -398,6 +398,8 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, String> {
         default_provider: config.default_provider,
         mimo_refresh_interval_seconds: config.mimo_refresh_interval_seconds,
         notify_cooldown_minutes: config.notify_cooldown_minutes,
+        always_on_top: config.always_on_top,
+        auto_clear_old_cache: config.auto_clear_old_cache,
     })
 }
 

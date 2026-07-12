@@ -45,6 +45,10 @@ pub struct StoredConfig {
     pub mimo_refresh_interval_seconds: u64, // 0 = use global
     #[serde(default = "default_notify_cooldown")]
     pub notify_cooldown_minutes: u64,
+    #[serde(default)]
+    pub always_on_top: bool,
+    #[serde(default)]
+    pub auto_clear_old_cache: bool,
 }
 
 fn default_theme() -> String { "light".to_string() }
@@ -81,6 +85,10 @@ pub struct AppConfig {
     pub mimo_refresh_interval_seconds: u64,
     #[serde(default = "default_notify_cooldown")]
     pub notify_cooldown_minutes: u64,
+    #[serde(default)]
+    pub always_on_top: bool,
+    #[serde(default)]
+    pub auto_clear_old_cache: bool,
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────
@@ -213,18 +221,26 @@ pub struct CallbackServerPort(pub u16);
 
 pub struct MimoDetailCache {
     items: Option<(std::time::Instant, Vec<UsageDetailItem>)>,
+    month_key: Option<String>,
     in_progress: bool,
+    in_progress_month: Option<String>,
 }
 
 impl MimoDetailCache {
     pub fn new() -> Self {
         Self {
             items: None,
+            month_key: None,
             in_progress: false,
+            in_progress_month: None,
         }
     }
-    pub fn get(&self, max_age: std::time::Duration) -> Option<Vec<UsageDetailItem>> {
+    pub fn get(&self, max_age: std::time::Duration, month: &str) -> Option<Vec<UsageDetailItem>> {
         if self.in_progress {
+            return None;
+        }
+        // 月份不匹配 → 缓存无效
+        if self.month_key.as_deref() != Some(month) {
             return None;
         }
         self.items
@@ -237,15 +253,17 @@ impl MimoDetailCache {
                 }
             })
     }
-    pub fn set(&mut self, items: Vec<UsageDetailItem>) {
+    pub fn set(&mut self, items: Vec<UsageDetailItem>, month: &str) {
         self.items = Some((std::time::Instant::now(), items));
+        self.month_key = Some(month.to_string());
         self.in_progress = false;
     }
-    pub fn mark_in_progress(&mut self) -> bool {
+    pub fn mark_in_progress(&mut self, month: &str) -> bool {
         if self.in_progress {
             return false;
         }
         self.in_progress = true;
+        self.in_progress_month = Some(month.to_string());
         true
     }
     pub fn clear_in_progress(&mut self) {

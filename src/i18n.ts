@@ -36,6 +36,8 @@ const translations: Record<string, Record<Lang, string>> = {
   'settings.general': { zh: '通用', en: 'General' },
   'settings.autostart': { zh: '开机自启', en: 'Auto Start' },
   'settings.autostart_desc': { zh: '开启后，每次登录 Windows 时自动启动应用。', en: 'Auto start on Windows login.' },
+  'settings.always_on_top': { zh: '窗口置顶', en: 'Always on Top' },
+  'settings.always_on_top_desc': { zh: '开启后，应用窗口保持在其他窗口之上。', en: 'Keep the app window on top of other windows.' },
   'settings.auto_refresh': { zh: '自动刷新', en: 'Auto Refresh' },
   'settings.auto_refresh_desc': { zh: '开启后，按设定周期自动拉取最新数据。', en: 'Automatically fetch latest data at set intervals.' },
   'settings.window_size': { zh: '窗口大小', en: 'Window Size' },
@@ -78,6 +80,11 @@ const translations: Record<string, Record<Lang, string>> = {
   'settings.clear_cache_desc': { zh: '清除本地缓存的使用数据，下次启动时重新获取。', en: 'Clear local cached usage data, refresh on next launch.' },
   'settings.notify_cooldown': { zh: '通知冷却时间', en: 'Notification Cooldown' },
   'settings.notify_cooldown_desc': { zh: '两次余额不足通知之间的最小间隔。', en: 'Minimum interval between low balance notifications.' },
+
+  // 缓存
+  'settings.cache_title': { zh: '缓存管理', en: 'Cache Management' },
+  'settings.auto_clear_cache': { zh: '自动清理过期缓存', en: 'Auto-clear old cache' },
+  'settings.auto_clear_cache_desc': { zh: '开启后每次启动自动清除超过一年的用量缓存。关闭时缓存持续累积可导出，但主页面仅展示近一年数据。', en: 'When enabled, clears usage cache older than 1 year on each startup. When disabled, cache accumulates for export but only the past year is displayed.' },
 
   // 通知
   'notify.title': { zh: '通知', en: 'Notifications' },

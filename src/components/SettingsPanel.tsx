@@ -27,6 +27,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [refresh, setRefresh] = React.useState(60);
   const [autoRefresh, setAutoRefresh] = React.useState(false);
   const [autostart, setAutostart] = React.useState(false);
+  const [alwaysOnTop, setAlwaysOnTop] = React.useState(false);
   const [lowBalanceNotify, setLowBalanceNotify] = React.useState(false);
   const [lowBalanceThreshold, setLowBalanceThreshold] = React.useState("5.00");
   const [usageToken, setUsageToken] = React.useState("");
@@ -52,13 +53,14 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("light");
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("token_per_currency");
+  const [autoClearOldCache, setAutoClearOldCache] = React.useState(false);
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   const PRESET_REFRESH = [60, 300, 1800, 3600];
   const PRESET_COOLDOWN = [10, 30, 60, 180, 360];
 
   React.useEffect(() => {
-    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); const ri = c.refreshIntervalSeconds || 60; setRefresh(ri); setCustomDsRefresh(!PRESET_REFRESH.includes(ri)); setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0); setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30)); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); }).catch(() => setStatus("浏览器预览模式"));
+    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); const ri = c.refreshIntervalSeconds || 60; setRefresh(ri); setCustomDsRefresh(!PRESET_REFRESH.includes(ri)); setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0); setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30)); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setAlwaysOnTop(c.alwaysOnTop || false); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); setAutoClearOldCache(c.autoClearOldCache || false); }).catch(() => setStatus("浏览器预览模式"));
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
@@ -94,6 +96,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const saveRefreshInterval = React.useCallback((s: number) => { const p = refresh; setRefresh(s); onRefreshIntervalChanged(s); void invoke<AppConfig>("save_refresh_interval", { refreshIntervalSeconds: s }).then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); onRefreshIntervalChanged(c.refreshIntervalSeconds || 60); }).catch(() => { setRefresh(p); onRefreshIntervalChanged(p); }); }, [onRefreshIntervalChanged, refresh]);
   const saveAutoRefreshEnabled = React.useCallback((e: boolean) => { const p = autoRefresh; setAutoRefresh(e); onAutoRefreshChanged(e); void invoke<AppConfig>("save_auto_refresh_enabled", { autoRefreshEnabled: e }).then((c) => { setConfig(c); setAutoRefresh(c.autoRefreshEnabled); onAutoRefreshChanged(c.autoRefreshEnabled); }).catch(() => { setAutoRefresh(p); onAutoRefreshChanged(p); }); }, [autoRefresh, onAutoRefreshChanged]);
   const saveAutostart = React.useCallback((e: boolean) => { const p = autostart; setAutostart(e); void invoke<AppConfig>("save_autostart", { autostart: e }).then((c) => { setConfig(c); setAutostart(c.autostart); }).catch(() => setAutostart(p)); }, [autostart]);
+  const saveAlwaysOnTop = React.useCallback((e: boolean) => { const p = alwaysOnTop; setAlwaysOnTop(e); void invoke<AppConfig>("save_always_on_top", { alwaysOnTop: e }).then((c) => { setConfig(c); setAlwaysOnTop(c.alwaysOnTop); }).catch(() => setAlwaysOnTop(p)); }, [alwaysOnTop]);
 
   const saveLowBalanceNotify = React.useCallback((e: boolean) => {
     const p = lowBalanceNotify; setLowBalanceNotify(e);
@@ -313,6 +316,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       <SettingsSection icon={<Power size={15} />} title={t('settings.general')}>
         <Toggle label={t('settings.autostart')} checked={autostart} onChange={saveAutostart} />
         <p>{t('settings.autostart_desc')}</p>
+        <Toggle label={t('settings.always_on_top')} checked={alwaysOnTop} onChange={saveAlwaysOnTop} />
+        <p>{t('settings.always_on_top_desc')}</p>
         <Toggle label={t('settings.auto_refresh')} checked={autoRefresh} onChange={saveAutoRefreshEnabled} />
         <p>{t('settings.auto_refresh_desc')}</p>
         {autoRefresh && (
@@ -606,6 +611,10 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
 
   const dataContent = (
     <>
+      <SettingsSection icon={<Settings size={15} />} title={t('settings.cache_title')}>
+        <Toggle label={t('settings.auto_clear_cache')} checked={autoClearOldCache} onChange={(e) => { setAutoClearOldCache(e); void invoke<AppConfig>("save_auto_clear_old_cache", { enabled: e }).then(setConfig).catch(() => {}); }} />
+        <p>{t('settings.auto_clear_cache_desc')}</p>
+      </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.clear_cache')}>
         <p>{t('settings.clear_cache_desc')}</p>
         <div className="settings-actions">

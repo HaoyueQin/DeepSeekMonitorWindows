@@ -1230,15 +1230,21 @@ button:disabled {
   font-weight: 800;
 }
 
-/* ---------- 颜色图例（柱状图底部） ---------- */
-.chart-legend-bottom {
+/* ---------- 图表底部：数据居左 + 图例居右 ---------- */
+.chart-footer {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 8px;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chart-footer .chart-legend {
+  display: flex;
+  gap: 14px;
 }
 
 .chart-legend-item {
@@ -1386,7 +1392,7 @@ button:disabled {
 [data-theme="light"] .bar-tooltip-head {
   border-bottom-color: rgba(40, 70, 100, 0.14);
 }
-[data-theme="light"] .chart-legend-bottom {
+[data-theme="light"] .chart-footer {
   border-top-color: rgba(40, 70, 100, 0.12);
 }
 

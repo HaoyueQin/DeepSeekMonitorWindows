@@ -38,7 +38,7 @@ impl CallbackServer {
                 if *request.method() == Method::Options {
                     let response = Response::from_string(String::new())
                         .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..])
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
                                 .unwrap(),
                         )
                         .with_header(
@@ -71,7 +71,7 @@ impl CallbackServer {
                         }
                     }
                     let response = Response::from_string("OK").with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"null"[..]).unwrap(),
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
                     );
                     let _ = request.respond(response);
                 }
@@ -246,6 +246,23 @@ fn save_default_provider(provider: String) -> Result<AppConfig, String> {
 fn save_mimo_refresh_interval(seconds: u64) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.mimo_refresh_interval_seconds = seconds;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_always_on_top(window: WebviewWindow, always_on_top: bool) -> Result<AppConfig, String> {
+    window.set_always_on_top(always_on_top).map_err(|e| e.to_string())?;
+    let mut config = config::read_stored_config()?;
+    config.always_on_top = always_on_top;
+    config::write_stored_config(&config)?;
+    config::to_app_config(config)
+}
+
+#[tauri::command]
+fn save_auto_clear_old_cache(enabled: bool) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    config.auto_clear_old_cache = enabled;
     config::write_stored_config(&config)?;
     config::to_app_config(config)
 }
@@ -498,6 +515,8 @@ pub fn run() {
             save_default_provider,
             save_mimo_refresh_interval,
             save_notify_cooldown,
+            save_always_on_top,
+            save_auto_clear_old_cache,
             set_provider,
             fetch_balance,
             save_usage_token,
@@ -542,8 +561,15 @@ pub fn run() {
 
             // 恢复窗口大小和位置，或首次启动定位到右下角
             if let Some(window) = app.get_webview_window("main") {
-                if let Ok(config) = config::read_stored_config() {
-                    if let (Some(w), Some(h), Some(x), Some(y)) = (config.window_width, config.window_height, config.window_x, config.window_y) {
+                let config = config::read_stored_config().ok();
+                // 恢复窗口置顶状态
+                if let Some(ref c) = config {
+                    if c.always_on_top {
+                        let _ = window.set_always_on_top(true);
+                    }
+                }
+                if let Some(ref c) = config {
+                    if let (Some(w), Some(h), Some(x), Some(y)) = (c.window_width, c.window_height, c.window_x, c.window_y) {
                         // 有保存的状态，恢复
                         let _ = window.set_size(tauri::LogicalSize::new(w, h));
                         let _ = window.set_position(tauri::PhysicalPosition::new(x.max(0), y.max(0)));

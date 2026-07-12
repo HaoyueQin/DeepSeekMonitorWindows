@@ -20,6 +20,8 @@ export type AppConfig = {
   defaultProvider: Provider;
   mimoRefreshIntervalSeconds: number;
   notifyCooldownMinutes: number;
+  alwaysOnTop: boolean;
+  autoClearOldCache: boolean;
 };
 
 export type BalanceData = {

@@ -152,6 +152,7 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
   const maxVal = Math.max(...points.map((p) => p.total), 1);
   const sumHit = points.reduce((s, p) => s + p.hit, 0);
   const sumMiss = points.reduce((s, p) => s + p.miss, 0);
+
   const sumTotal = points.reduce((s, p) => s + p.total, 0);
   const hitRate = sumHit + sumMiss > 0 ? ((sumHit / (sumHit + sumMiss)) * 100).toFixed(3) : "0";
   const sym = currency === "usd" ? "$" : "¥";
@@ -163,6 +164,8 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
       : `${(displayCost * 1_000_000 / sumTotal).toFixed(3)} ${sym}/MT`
     : "—";
   const canGoForward = weekOffset < 0;
+  const MAX_WEEKS_BACK = 52; // 限制一年
+  const canGoBack = weekOffset > -(MAX_WEEKS_BACK + 1);
   const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
   const placeholder = state === "loading" ? "查询中…" : state === "nokey" ? "未配置用量 Token" : state === "error" ? error : "暂无数据";
 
@@ -171,11 +174,10 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
       <div className="card-title-row">
         <div className="caption-with-icon"><BarChart3 size={16} className="brand-blue" /><span>缓存命中明细</span></div>
         <div className="chart-nav">
-          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} title="上一周">‹</button>
+          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title="上一周">‹</button>
           <span className="chart-nav-label">{weekLabel}</span>
           <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">›</button>
         </div>
-        <span className="chart-total">{state === "ok" ? `${hitRate}% · ${fmtTokensShort(sumTotal)} · ${ratio}` : "—"}</span>
       </div>
       {state === "ok" && points.length > 0 ? (
         <>
@@ -214,10 +216,13 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
               </div>
             ))}
           </div>
-          <div className="chart-legend-bottom">
-            <span className="chart-legend-item"><i className="dot hit" />命中</span>
-            <span className="chart-legend-item"><i className="dot miss" />未命中</span>
-            <span className="chart-legend-item"><i className="dot response" />输出</span>
+          <div className="chart-footer">
+            <span className="chart-total">{state === "ok" ? `${hitRate}% · ${fmtTokensShort(sumTotal)} · ${ratio}` : "—"}</span>
+            <span className="chart-legend">
+              <span className="chart-legend-item"><i className="dot hit" />命中</span>
+              <span className="chart-legend-item"><i className="dot miss" />未命中</span>
+              <span className="chart-legend-item"><i className="dot response" />输出</span>
+            </span>
           </div>
         </>
       ) : <div className="chart-placeholder">{placeholder}</div>}

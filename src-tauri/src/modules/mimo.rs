@@ -128,10 +128,22 @@ pub async fn fetch_mimo_api_with_method(
     method: &str,
     timeout_secs: u64,
 ) -> Result<String, String> {
+    fetch_mimo_api_with_method_and_body(app, path, method, timeout_secs, None).await
+}
+
+pub async fn fetch_mimo_api_with_method_and_body(
+    app: &tauri::AppHandle,
+    path: &str,
+    method: &str,
+    timeout_secs: u64,
+    _body: Option<&str>,
+) -> Result<String, String> {
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
     let _lock = lock_guard.lock().await;
+    log::info!("[MiMo] fetch_api lock acquired, path={} method={}", path, method);
 
     let window = ensure_mimo_webview_sync(app)?;
+    log::info!("[MiMo] fetch_api webview ready, label={}", window.label());
 
     let cb_port = app
         .state::<Mutex<CallbackServerPort>>()
@@ -188,6 +200,7 @@ pub async fn fetch_mimo_api_with_method(
     window
         .eval(&js)
         .map_err(|e| format!("注入脚本失败：{e}"))?;
+    log::info!("[MiMo] fetch_api JS injected ({} chars), waiting for callback on port {} req={}", js.len(), cb_port, &req_id[..req_id.len().min(20)]);
 
     let timeout = std::time::Duration::from_secs(timeout_secs);
     match tokio::time::timeout(timeout, rx).await {
@@ -226,6 +239,7 @@ pub async fn fetch_mimo_api_with_method(
         }
         Ok(Err(_)) => Err("数据接收通道关闭".to_string()),
         Err(_) => {
+            log::warn!("[MiMo] fetch_api TIMEOUT after {}s, path={} port={}", timeout_secs, path, cb_port);
             let state =
                 app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
             let mut map = state.lock().unwrap();
@@ -334,8 +348,8 @@ pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalance
 
 pub async fn do_fetch_mimo_usage(
     app: &tauri::AppHandle,
-    _month: u32,
-    _year: u32,
+    month: u32,
+    year: u32,
 ) -> Result<MimoUsageResult, String> {
     let overview_json = fetch_mimo_api(app, "/api/v1/usage", 15).await?;
     log::debug!(
@@ -394,17 +408,18 @@ pub async fn do_fetch_mimo_usage(
         .unwrap_or(0.0);
 
     // 尝试获取详细用量（按模型+日期分解）
+    let month_key = format!("{}-{:02}", year, month);
     let detail_items = {
         let cache = app.state::<Mutex<crate::modules::types::MimoDetailCache>>();
         let cached = cache
             .lock()
             .unwrap()
-            .get(std::time::Duration::from_secs(300));
+            .get(std::time::Duration::from_secs(300), &month_key);
         match cached {
             Some(items) if !items.is_empty() => Some(items),
             Some(_) => None,
             None => {
-                let can_start = cache.lock().unwrap().mark_in_progress();
+                let can_start = cache.lock().unwrap().mark_in_progress(&month_key);
                 if !can_start {
                     log::info!("[MiMo] detail extraction already in progress, skipping");
                     return Ok(MimoUsageResult {
@@ -413,9 +428,9 @@ pub async fn do_fetch_mimo_usage(
                         month_cost,
                     });
                 }
-                match fetch_mimo_usage_detail(app).await {
+                match fetch_mimo_usage_detail(app, month, year).await {
                     Ok(items) if !items.is_empty() => {
-                        cache.lock().unwrap().set(items.clone());
+                        cache.lock().unwrap().set(items.clone(), &month_key);
                         Some(items)
                     }
                     _ => {
@@ -443,8 +458,13 @@ pub async fn do_fetch_mimo_usage(
                 ),
             > = std::collections::HashMap::new();
             let mut detail_month_cost: f64 = 0.0;
+            let month_prefix = format!("{}-{:02}", year, month);
 
             for item in &items {
+                // 仅统计请求月份的数据，避免把历史总消费当成当月消费
+                if !item.date.starts_with(&month_prefix) {
+                    continue;
+                }
                 let model_entry =
                     models_map
                         .entry(item.model.clone())
@@ -598,6 +618,8 @@ fn parse_detail_items(json: &str) -> Result<Vec<UsageDetailItem>, String> {
 
 async fn fetch_mimo_usage_detail(
     app: &tauri::AppHandle,
+    month: u32,
+    year: u32,
 ) -> Result<Vec<UsageDetailItem>, String> {
     // 1. 先用缓存的 ph 尝试直接调用 API（快速路径）
     {
@@ -638,19 +660,20 @@ async fn fetch_mimo_usage_detail(
 
     // 2. 缓存的 ph 失效或不存在 → 导航到用量页面
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
-    let _lock = lock_guard.lock().await;
-
-    let window = ensure_mimo_webview_sync(app)?;
+    let window = {
+        let _lock = lock_guard.lock().await;
+        let w = ensure_mimo_webview_sync(app)?;
+        log::info!("[MiMo] detail: navigating to usage page for {}-{:02}", year, month);
+        let _ = w.eval("window.__mimo_detail = null; window.__mimo_ph = null;");
+        let usage_url: tauri::Url = format!("https://platform.xiaomimimo.com/console/usage?month={}-{:02}", year, month)
+            .parse()
+            .map_err(|_| "无效 URL".to_string())?;
+        let _ = w.navigate(usage_url);
+        w
+    }; // 初始化完成后释放锁，避免阻塞并发的余额查询
 
     // 复用主 CallbackServer 端口，不再创建独立 HTTP 服务器
     let cb_port = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
-
-    log::info!("[MiMo] detail: navigating to usage page (on_page_load hook active)");
-    let _ = window.eval("window.__mimo_detail = null; window.__mimo_ph = null;");
-    let usage_url: tauri::Url = "https://platform.xiaomimimo.com/console/usage"
-        .parse()
-        .map_err(|_| "无效 URL".to_string())?;
-    let _ = window.navigate(usage_url);
 
     let start = std::time::Instant::now();
     let mut auth_401_count = 0u32;
@@ -676,17 +699,20 @@ async fn fetch_mimo_usage_detail(
             r#"try{{(async()=>{{
                 var d=window.__mimo_detail||null;
                 var ph=window.__mimo_ph||localStorage.getItem('mimo_platform_ph')||null;
-                if(d){{
+                if(d&&!/"data":\[\]/.test(d)){{
                     fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:d}})}});
                 }} else if(ph){{
-                    try{{var u='https://platform.xiaomimimo.com/api/v1/usage/detail/list?api-platform_ph='+encodeURIComponent(ph);var r=await fetch(u,{{method:'POST',credentials:'include',headers:{{'Accept':'application/json'}}}});var t=await r.text();fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:t}})}});}}catch(e){{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:'ERR:'+e.message}})}});}}
+                    try{{var u='https://platform.xiaomimimo.com/api/v1/usage/detail/list?api-platform_ph='+encodeURIComponent(ph);var r=await fetch(u,{{method:'POST',credentials:'include',headers:{{'Accept':'application/json','Content-Type':'application/json'}},body:JSON.stringify({{year:{year},month:{month}}})}});var t=await r.text();fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:t}})}});}}catch(e){{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:'ERR:'+e.message}})}});}}
                 }} else {{
                     fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:'WAITING'}})}});
                 }}
             }})()}}catch(e){{fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{req_id}',data:'EXC:'+e.message}})}});}}"#,
-            port = cb_port, req_id = req_id,
+            port = cb_port, req_id = req_id, year = year, month = month,
         );
-        let _ = window.eval(&check_js);
+        let _ = {
+            let _lock = lock_guard.lock().await;
+            window.eval(&check_js)
+        };
 
         if let Ok(Ok(data)) =
             tokio::time::timeout(std::time::Duration::from_secs(5), rx).await

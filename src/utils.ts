@@ -79,7 +79,8 @@ export const modelDisplayName = (key: string): string => {
 };
 
 export const modelIcon = (key: string): "flash" | "pro" | "mimo" => {
-  if (key.startsWith("mimo-")) return "mimo";
+  if (key === "mimo-v2.5-pro") return "pro";
+  if (key.startsWith("mimo-")) return "flash";
   if (key.includes("pro")) return "pro";
   return "flash";
 };
