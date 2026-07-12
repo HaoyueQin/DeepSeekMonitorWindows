@@ -55,6 +55,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("token_per_currency");
   const [autoClearOldCache, setAutoClearOldCache] = React.useState(true);
+  const [reloading, setReloading] = React.useState(false);
+  const [cacheMsg, setCacheMsg] = React.useState("");
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   const PRESET_REFRESH = [60, 300, 1800, 3600];
@@ -223,9 +225,9 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           html += `<h3>${repo.owner}${repo.label}</h3>`;
           for (const r of allReleases) {
             const date = new Date(r.published_at).toLocaleDateString("zh-CN");
-            html += `<details><summary><strong>${r.tag_name}</strong> (${date})</summary>`;
+            html += `<details><summary>${r.tag_name} <span style="opacity:0.5;font-weight:400;font-size:0.85em">${date}</span></summary><div class="details-content">`;
             html += await marked.parse(r.body || "");
-            html += `</details>`;
+            html += `</div></details>`;
           }
         } catch (e) {
           html += `<p><em>无法获取 ${repo.owner} 的更新日志...</em></p>`;
@@ -616,14 +618,15 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         <Toggle label={t('settings.auto_clear_cache')} checked={autoClearOldCache} onChange={(e) => { setAutoClearOldCache(e); void invoke<AppConfig>("save_auto_clear_old_cache", { enabled: e }).then(setConfig).catch(() => {}); }} />
         <p>{t('settings.auto_clear_cache_desc')}</p>
         <div className="settings-actions">
-          <button className="primary" onClick={() => { if (onReloadCache) onReloadCache(); }}>{t('settings.reload_cache')}</button>
+          <button className="primary" disabled={reloading} onClick={async () => { setReloading(true); setCacheMsg(""); try { await (onReloadCache ? onReloadCache() : Promise.resolve()); setCacheMsg("✓ 缓存已重新加载"); } catch { setCacheMsg("✗ 加载失败，请重试"); } finally { setReloading(false); } }}>{reloading ? "加载中…" : t('settings.reload_cache')}</button>
         </div>
         <p>{t('settings.reload_cache_desc')}</p>
+        {cacheMsg && <p style={{ color: cacheMsg.startsWith("✓") ? 'var(--green)' : 'var(--orange)', marginTop: 4 }}>{cacheMsg}</p>}
       </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.clear_cache')}>
         <p>{t('settings.clear_cache_desc')}</p>
         <div className="settings-actions">
-          <button className="secondary" onClick={() => { localStorage.clear(); alert("缓存已清除"); }}>{t('settings.clear_cache')}</button>
+          <button className="secondary" onClick={() => { localStorage.clear(); setCacheMsg("✓ 缓存已清除"); }}>{t('settings.clear_cache')}</button>
         </div>
       </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title="导出使用数据">

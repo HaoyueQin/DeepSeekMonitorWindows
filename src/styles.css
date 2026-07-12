@@ -741,9 +741,50 @@ button {
 }
 
 .changelog-body h3 { margin: 14px 0 8px; font-size: 1.15em; color: var(--text-strong); }
-.changelog-body summary { cursor: pointer; margin: 8px 0 4px; font-size: 1em; font-weight: 700; color: var(--text-strong); user-select: none; }
-.changelog-body summary:hover { opacity: 0.8; }
-.changelog-body details { margin-bottom: 6px; }
+.changelog-body details {
+  margin-bottom: 2px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.changelog-body summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--text-strong);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(var(--fg), 0.03);
+  border-radius: 8px;
+  transition: background 0.15s;
+  list-style: none;
+}
+.changelog-body summary::-webkit-details-marker { display: none; }
+.changelog-body summary::before {
+  content: '›';
+  display: inline-block;
+  font-size: 1.2em;
+  font-weight: 400;
+  transition: transform 0.25s ease;
+  opacity: 0.5;
+  margin-right: 2px;
+}
+.changelog-body details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.changelog-body details[open] > summary {
+  background: rgba(var(--fg), 0.06);
+  border-radius: 8px 8px 0 0;
+}
+.changelog-body summary:hover { background: rgba(var(--fg), 0.06); }
+.changelog-body details[open] > summary:hover { background: rgba(var(--fg), 0.08); }
+.changelog-body .details-content {
+  padding: 8px 12px 10px 24px;
+  background: rgba(var(--fg), 0.015);
+  border-radius: 0 0 8px 8px;
+}
 .changelog-body p { margin: 2px 0; }
 .changelog-body ul { margin: 2px 0 6px; padding-left: 18px; }
 .changelog-body li { margin: 1px 0; }
