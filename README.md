@@ -6,6 +6,12 @@ DeepSeek / MiMo Monitor Windows 是一个面向 Windows 的 DeepSeek & MiMo API 
 
 郑重声明：本项目不是 DeepSeek 官方产品，也不是 MiMo 官方产品。
 
+## ⚠️ 当前状态（2026-07-12）
+
+**DeepSeek**：余额、用量、趋势图均正常工作，支持过去 12 个月数据缓存。
+
+**MiMo**：余额查询正常，用量明细存在**已知问题**——详情 API (`/api/v1/usage/detail/list`) 需携带 `{year, month}` JSON body 才能返回指定月份数据。目前通过 WebView 代理注入 JS 的方式调用，快速路径（缓存 ph 直接调 API）已修复 body 参数，但**页面提取回退路径偶发失败**，表现为部分月份（如 6 月）用量明细返回空。正在排查中。重新加载缓存按钮可尝试重试。
+
 ## About
 
 DeepSeek / MiMo Monitor Windows: Windows desktop adaptation of felikschu/deepseek-monitor, built with Tauri, React and Rust for DeepSeek and MiMo balance and usage monitoring.
