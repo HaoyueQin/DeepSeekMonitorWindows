@@ -45,8 +45,9 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [downloadProgress, setDownloadProgress] = React.useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
   const [downloadDone, setDownloadDone] = React.useState(false);
   const [changelogLoading, setChangelogLoading] = React.useState(false);
-  const [changelogHtml, setChangelogHtml] = React.useState("");
   const [changelogError, setChangelogError] = React.useState("");
+  const [changelogReleases, setChangelogReleases] = React.useState<Array<{repo:string;tag:string;date:string;html:string}>>([]);
+  const [openRelease, setOpenRelease] = React.useState<string | null>(null);
   const [activeCategory, setActiveCategory] = React.useState<string | null>(null);
   const [customDsRefresh, setCustomDsRefresh] = React.useState(false);
   const [customMimoRefresh, setCustomMimoRefresh] = React.useState(false);
@@ -199,16 +200,16 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   }, []);
 
   const handleViewChangelog = React.useCallback(async () => {
-    if (changelogHtml) { setChangelogHtml(""); return; }
+    if (changelogReleases.length > 0) { setChangelogReleases([]); setOpenRelease(null); return; }
     setChangelogLoading(true);
     setChangelogError("");
-    setChangelogHtml("");
+    setOpenRelease(null);
     try {
       const repos = [
         { owner: "HaoyueQin", label: "" },
         { owner: "Joyi-code", label: " (原作者)" },
       ];
-      let html = "";
+      const releases: Array<{repo:string;tag:string;date:string;html:string}> = [];
       for (const repo of repos) {
         try {
           let allReleases: Array<{ tag_name: string; published_at: string; body: string }> = [];
@@ -222,24 +223,22 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             if (pageReleases.length < 100) break;
             page++;
           }
-          html += `<h3>${repo.owner}${repo.label}</h3>`;
           for (const r of allReleases) {
             const date = new Date(r.published_at).toLocaleDateString("zh-CN");
-            html += `<details><summary>${r.tag_name} <span style="opacity:0.5;font-weight:400;font-size:0.85em">${date}</span></summary><div class="details-content">`;
-            html += await marked.parse(r.body || "");
-            html += `</div></details>`;
+            const html = await marked.parse(r.body || "");
+            releases.push({ repo: `${repo.owner}${repo.label}`, tag: r.tag_name, date, html });
           }
         } catch (e) {
-          html += `<p><em>无法获取 ${repo.owner} 的更新日志...</em></p>`;
+          releases.push({ repo: `${repo.owner}${repo.label}`, tag: "错误", date: "", html: `<em>无法获取更新日志...</em>` });
         }
       }
-      setChangelogHtml(html);
+      setChangelogReleases(releases);
     } catch (e) {
       setChangelogError(`获取更新日志失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setChangelogLoading(false);
     }
-  }, [changelogHtml]);
+  }, [changelogReleases.length]);
 
   const [lang, setLangState] = React.useState(getLang());
 
@@ -553,10 +552,50 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         {updateError && <span className="configured" style={{ color: 'var(--orange)' }}>⚠ {updateError}</span>}
       </div>
       <button className="secondary" onClick={() => { void handleViewChangelog(); }} disabled={changelogLoading} style={{ marginTop: 8 }}>
-        {changelogLoading ? "加载中…" : changelogHtml ? "收起更新日志" : "查看更新日志"}
+        {changelogLoading ? "加载中…" : changelogReleases.length > 0 ? "收起更新日志" : "查看更新日志"}
       </button>
       {changelogError && <p className="muted" style={{ color: 'var(--orange)', marginTop: 4 }}>{changelogError}</p>}
-      {changelogHtml && <div className="changelog-body" style={{ marginTop: 8, maxHeight: 300, overflowY: 'auto', fontSize: '0.8em', lineHeight: 1.6, color: 'var(--text-muted)' }} dangerouslySetInnerHTML={{ __html: changelogHtml }} />}
+      {changelogReleases.length > 0 && (
+        <div className="changelog-body" style={{ marginTop: 8, maxHeight: 360, overflowY: 'auto', fontSize: '0.8em', lineHeight: 1.6, color: 'var(--text-muted)' }}>
+          {(() => {
+            let lastRepo = "";
+            return changelogReleases.map((r, i) => {
+              const showRepo = r.repo !== lastRepo;
+              lastRepo = r.repo;
+              const isOpen = openRelease === `${i}`;
+              return (
+                <React.Fragment key={i}>
+                  {showRepo && <h3 style={{ margin: '10px 0 6px', fontSize: '1.05em', color: 'var(--text-strong)' }}>{r.repo}</h3>}
+                  <div style={{ marginBottom: 2, borderRadius: 8, overflow: 'hidden' }}>
+                    <button
+                      onClick={() => setOpenRelease(isOpen ? null : `${i}`)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '8px 12px',
+                        border: 'none', background: isOpen ? 'rgba(var(--fg), 0.06)' : 'rgba(var(--fg), 0.03)',
+                        color: 'var(--text-strong)', cursor: 'pointer', fontSize: '0.9em', fontWeight: 600,
+                        borderRadius: isOpen ? '8px 8px 0 0' : 8, textAlign: 'left',
+                      }}
+                    >
+                      <span style={{ display: 'inline-block', transition: 'transform 0.25s ease', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)', opacity: 0.5, fontSize: '1.1em' }}>›</span>
+                      {r.tag}
+                      <span style={{ opacity: 0.5, fontWeight: 400, fontSize: '0.85em' }}>{r.date}</span>
+                    </button>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateRows: isOpen ? '1fr' : '0fr',
+                      transition: 'grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}>
+                      <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                        <div className="changelog-detail" dangerouslySetInnerHTML={{ __html: r.html }} style={{ padding: '8px 12px 10px 28px', background: 'rgba(var(--fg), 0.015)', borderRadius: '0 0 8px 8px' }} />
+                      </div>
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            });
+          })()}
+        </div>
+      )}
       {updateInfo && !downloading && !downloadDone && (
         <div style={{ marginTop: 8 }}>
           <p className="muted">v{updateInfo.version} {updateInfo.date ? `(${updateInfo.date})` : ""}</p>

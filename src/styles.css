@@ -741,56 +741,14 @@ button {
 }
 
 .changelog-body h3 { margin: 14px 0 8px; font-size: 1.15em; color: var(--text-strong); }
-.changelog-body details {
-  margin-bottom: 2px;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.changelog-body summary {
-  cursor: pointer;
-  padding: 8px 12px;
-  font-size: 0.9em;
-  font-weight: 600;
-  color: var(--text-strong);
-  user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(var(--fg), 0.03);
-  border-radius: 8px;
-  transition: background 0.15s;
-  list-style: none;
-}
-.changelog-body summary::-webkit-details-marker { display: none; }
-.changelog-body summary::before {
-  content: '›';
-  display: inline-block;
-  font-size: 1.2em;
-  font-weight: 400;
-  transition: transform 0.25s ease;
-  opacity: 0.5;
-  margin-right: 2px;
-}
-.changelog-body details[open] > summary::before {
-  transform: rotate(90deg);
-}
-.changelog-body details[open] > summary {
-  background: rgba(var(--fg), 0.06);
-  border-radius: 8px 8px 0 0;
-}
-.changelog-body summary:hover { background: rgba(var(--fg), 0.06); }
-.changelog-body details[open] > summary:hover { background: rgba(var(--fg), 0.08); }
-.changelog-body .details-content {
-  padding: 8px 12px 10px 24px;
-  background: rgba(var(--fg), 0.015);
-  border-radius: 0 0 8px 8px;
-}
 .changelog-body p { margin: 2px 0; }
 .changelog-body ul { margin: 2px 0 6px; padding-left: 18px; }
 .changelog-body li { margin: 1px 0; }
 .changelog-body code { font-size: 0.92em; background: rgba(var(--fg), 0.1); padding: 1px 5px; border-radius: 4px; }
 .changelog-body a { color: var(--brand-light); }
 .changelog-body blockquote { border-left: 3px solid rgba(var(--fg), 0.25); margin: 6px 0; padding-left: 10px; color: var(--text-faint); }
+.changelog-detail h1, .changelog-detail h2 { font-size: 1em; margin: 4px 0; }
+.changelog-detail h3 { font-size: 0.95em; margin: 3px 0; }
 
 .config-path {
   display: flex;
@@ -848,6 +806,15 @@ button {
 button:disabled {
   cursor: default;
   opacity: 0.46;
+}
+
+/* 设置页按钮按压凹陷效果 */
+.settings-panel button:not(:disabled):active {
+  transform: scale(0.96);
+  transition: transform 0.08s ease;
+}
+.settings-panel button:not(:disabled) {
+  transition: transform 0.08s ease, opacity 0.15s, background 0.15s;
 }
 
 .link-button {
