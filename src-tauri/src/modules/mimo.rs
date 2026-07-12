@@ -136,7 +136,7 @@ pub async fn fetch_mimo_api_with_method_and_body(
     path: &str,
     method: &str,
     timeout_secs: u64,
-    _body: Option<&str>,
+    body: Option<&str>,
 ) -> Result<String, String> {
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
     let _lock = lock_guard.lock().await;
@@ -609,8 +609,45 @@ async fn fetch_mimo_usage_detail(
         let config = read_stored_config()?;
         if let Some(ref ph) = config.mimo_ph {
             log::debug!("[MiMo] detail: trying cached ph");
+            let body_json = format!("{{\\\"year\\\":{},\\\"month\\\":{}}}", year, month);
             let api_url = format!("/api/v1/usage/detail/list?api-platform_ph={}", ph);
-            if let Ok(json) = fetch_mimo_api_with_method(app, &api_url, "POST", 10).await {
+            let full_url = format!("https://platform.xiaomimimo.com{}", api_url);
+            let cb_port = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
+            let req_id = format!("__fp_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+            let (tx, rx) = oneshot::channel();
+            {
+                let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                state.lock().unwrap().insert(req_id.clone(), tx);
+            }
+            let safe_url = serde_json::to_string(&full_url).unwrap_or_default();
+            let safe_body = serde_json::to_string(&body_json).unwrap_or_default();
+            let safe_req_id = serde_json::to_string(&req_id).unwrap_or_default();
+            let js = format!(
+                r#"(async function() {{
+                    try {{
+                        var r = await fetch({safe_url}, {{
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {{ 'Accept': 'application/json', 'Content-Type': 'application/json' }},
+                            body: {safe_body}
+                        }});
+                        var t = await r.text();
+                        fetch('http://127.0.0.1:{port}/mimo-callback', {{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:{safe_req_id},data:t}})}});
+                    }} catch(e) {{
+                        fetch('http://127.0.0.1:{port}/mimo-callback', {{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:{safe_req_id},data:'ERROR:'+e.message}})}});
+                    }}
+                }})()"#,
+                port = cb_port, safe_url = safe_url, safe_body = safe_body, safe_req_id = safe_req_id,
+            );
+            let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
+            let _lock = lock_guard.lock().await;
+            let window = ensure_mimo_webview_sync(app)?;
+            let _ = window.eval(&js);
+            let json = match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+                Ok(Ok(data)) => data,
+                _ => { return Err("fast-path failed".into()); }
+            };
+            {
                 log::info!(
                     "[MiMo] detail fast-path response (first 500): {}",
                     &json[..json.len().min(LOG_TRUNCATE_LEN)]
@@ -628,15 +665,8 @@ async fn fetch_mimo_usage_detail(
                         let _ = write_stored_config(&config);
                     }
                 }
-            } else {
-                log::warn!(
-                    "[MiMo] detail fast-path API call failed, clearing cached ph"
-                );
-                if let Ok(mut config) = read_stored_config() {
-                    config.mimo_ph = None;
-                    let _ = write_stored_config(&config);
-                }
             }
+            // fast-path response was empty or parse failed, fall through to page extraction
             log::info!("[MiMo] detail fast-path failed, falling back to page extraction");
         }
     }
