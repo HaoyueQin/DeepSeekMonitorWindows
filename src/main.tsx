@@ -60,7 +60,6 @@ function clearOldCache(provider: Provider) {
 /** 合并多个月的 UsageResult（DeepSeek） */
 function mergeDS(months: UsageResult[]): UsageResult {
   const daysMap = new Map<string, UsageResult['days'][number]>();
-  const modelMap = new Map<string, UsageResult['models'][number]>();
   for (const m of months) {
     for (const d of m.days) {
       const e = daysMap.get(d.date);
@@ -70,25 +69,17 @@ function mergeDS(months: UsageResult[]): UsageResult {
         e.proTokens += d.proTokens; e.proCacheHit += d.proCacheHit; e.proCacheMiss += d.proCacheMiss; e.proResponse += d.proResponse;
       } else { daysMap.set(d.date, { ...d }); }
     }
-    for (const mdl of m.models) {
-      const e = modelMap.get(mdl.key);
-      if (e) {
-        e.totalTokens += mdl.totalTokens; e.requestCount += mdl.requestCount;
-        e.cacheHitTokens += mdl.cacheHitTokens; e.cacheMissTokens += mdl.cacheMissTokens; e.responseTokens += mdl.responseTokens; e.cost += mdl.cost;
-      } else { modelMap.set(mdl.key, { ...mdl }); }
-    }
   }
   return {
     monthCost: months[0]?.monthCost ?? 0,
     days: [...daysMap.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    models: [...modelMap.values()],
+    models: months[0]?.models ?? [],
   };
 }
 
 /** 合并多个月的 MimoUsageResult */
 function mergeMimo(months: MimoUsageResult[]): MimoUsageResult {
   const daysMap = new Map<string, MimoUsageResult['days'][number]>();
-  // Deep-merge days: 同日期累加 total_tokens/total_cost，models 也合并
   for (const m of months) {
     for (const d of m.days) {
       const e = daysMap.get(d.date);
@@ -106,20 +97,10 @@ function mergeMimo(months: MimoUsageResult[]): MimoUsageResult {
       } else { daysMap.set(d.date, { ...d, models: d.models.map(m2 => ({ ...m2 })) }); }
     }
   }
-  const modelMap = new Map<string, MimoUsageModel>();
-  for (const m of months) {
-    for (const mdl of m.models) {
-      const e = modelMap.get(mdl.key);
-      if (e) {
-        e.totalTokens += mdl.totalTokens; e.requestCount += mdl.requestCount;
-        e.cacheHitTokens += mdl.cacheHitTokens; e.cacheMissTokens += mdl.cacheMissTokens; e.responseTokens += mdl.responseTokens; e.cost += mdl.cost;
-      } else { modelMap.set(mdl.key, { ...mdl }); }
-    }
-  }
   return {
     monthCost: months[0]?.monthCost ?? 0,
     days: [...daysMap.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    models: [...modelMap.values()],
+    models: months[0]?.models ?? [],
   };
 }
 
@@ -139,7 +120,7 @@ function App() {
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [exchangeRate, setExchangeRate] = React.useState<number>(0.137);
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("currency_per_token");
-  const [autoClearOld, setAutoClearOld] = React.useState(false);
+  const [autoClearOld, setAutoClearOld] = React.useState(true);
 
   const providerRef = React.useRef(provider);
   const fetchingRef = React.useRef<Set<string>>(new Set());
@@ -169,7 +150,7 @@ function App() {
 
     for (const { year, month } of months) {
       const data = getCached(active, year, month);
-      if (data && data.days && data.days.length > 0) {
+      if (data) {
         cached.push(data);
       } else if (!fetchingRef.current.has(cacheKey(active, year, month))) {
         missing.push({ year, month });
@@ -183,7 +164,7 @@ function App() {
         const data = active === "deepseek"
           ? await invoke<UsageResult>("fetch_usage", { month, year })
           : await invoke<MimoUsageResult>("fetch_mimo_usage", { month, year });
-        if (data && data.days && data.days.length > 0) {
+        if (data) {
           setCached(active, year, month, data);
           cached.push(data);
         }
@@ -218,7 +199,7 @@ function App() {
       const all: (UsageResult | MimoUsageResult)[] = [];
       for (const { year: y, month: m } of months) {
         const c = getCached(active, y, m);
-        if (c && c.days && c.days.length > 0) all.push(c);
+        if (c) all.push(c);
       }
       if (all.length > 0) {
         const merged = active === "deepseek"
@@ -262,7 +243,7 @@ function App() {
           setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60); setAutoRefreshEnabled(config.autoRefreshEnabled);
           setCurrency(config.currency || "cny");
           setEfficiencyUnit(config.efficiencyUnit || "currency_per_token");
-          setAutoClearOld(config.autoClearOldCache || false);
+          setAutoClearOld(config.autoClearOldCache ?? true);
           const cached = localStorage.getItem("dsm-exrate-v2");
           if (cached) {
             try {

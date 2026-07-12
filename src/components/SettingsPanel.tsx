@@ -53,14 +53,14 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("light");
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("token_per_currency");
-  const [autoClearOldCache, setAutoClearOldCache] = React.useState(false);
+  const [autoClearOldCache, setAutoClearOldCache] = React.useState(true);
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   const PRESET_REFRESH = [60, 300, 1800, 3600];
   const PRESET_COOLDOWN = [10, 30, 60, 180, 360];
 
   React.useEffect(() => {
-    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); const ri = c.refreshIntervalSeconds || 60; setRefresh(ri); setCustomDsRefresh(!PRESET_REFRESH.includes(ri)); setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0); setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30)); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setAlwaysOnTop(c.alwaysOnTop || false); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); setAutoClearOldCache(c.autoClearOldCache || false); }).catch(() => setStatus("浏览器预览模式"));
+    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); const ri = c.refreshIntervalSeconds || 60; setRefresh(ri); setCustomDsRefresh(!PRESET_REFRESH.includes(ri)); setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0); setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30)); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setAlwaysOnTop(c.alwaysOnTop || false); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); setAutoClearOldCache(c.autoClearOldCache ?? true); }).catch(() => setStatus("浏览器预览模式"));
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 

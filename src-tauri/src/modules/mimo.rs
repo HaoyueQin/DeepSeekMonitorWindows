@@ -332,7 +332,7 @@ pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalance
                 cost.current_month_cost
             );
             return Ok(MimoBalanceResult {
-                available_balance: cost.total_cost.clone(),
+                available_balance: "—".to_string(),
                 currency: "CNY".to_string(),
                 total_consumption: cost.total_cost,
                 monthly_expense: cost.current_month_cost,
@@ -562,27 +562,10 @@ pub async fn do_fetch_mimo_usage(
             Ok(result)
         }
         _ => {
-            // fallback：总用量概览（detail API 不可用时）
+            // fallback：detail API 不可用，仅使用 overview 的 month_cost，不伪造模型数据
             log::info!("[MiMo] detail API unavailable, using overview fallback");
-            let mut models = Vec::new();
-            if let Some(tokens) = &overview.token_usage {
-                if tokens.input_token > 0 {
-                    models.push(MimoUsageModel {
-                        key: "mimo-v2.5-pro".to_string(),
-                        name: "MiMo-V2.5-Pro".to_string(),
-                        total_tokens: tokens.input_token + tokens.output_token,
-                        request_count: 0,
-                        cache_hit_tokens: tokens.cache_token,
-                        cache_miss_tokens: tokens
-                            .input_token
-                            .saturating_sub(tokens.cache_token),
-                        response_tokens: tokens.output_token,
-                        cost: 0.0,
-                    });
-                }
-            }
             Ok(MimoUsageResult {
-                models,
+                models: vec![],
                 days: vec![],
                 month_cost,
             })

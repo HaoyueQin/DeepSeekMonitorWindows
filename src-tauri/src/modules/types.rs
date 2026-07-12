@@ -47,7 +47,7 @@ pub struct StoredConfig {
     pub notify_cooldown_minutes: u64,
     #[serde(default)]
     pub always_on_top: bool,
-    #[serde(default)]
+    #[serde(default = "default_auto_clear")]
     pub auto_clear_old_cache: bool,
 }
 
@@ -56,6 +56,7 @@ fn default_currency() -> String { "cny".to_string() }
 fn default_efficiency_unit() -> String { "token_per_currency".to_string() }
 fn default_provider() -> String { "deepseek".to_string() }
 fn default_notify_cooldown() -> u64 { 30 }
+fn default_auto_clear() -> bool { true }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,7 +88,7 @@ pub struct AppConfig {
     pub notify_cooldown_minutes: u64,
     #[serde(default)]
     pub always_on_top: bool,
-    #[serde(default)]
+    #[serde(default = "default_auto_clear")]
     pub auto_clear_old_cache: bool,
 }
 
