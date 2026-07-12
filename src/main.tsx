@@ -145,6 +145,9 @@ function App() {
 
     if (autoClearOld) clearOldCache(active);
 
+    // 每次全量加载时重置防重集合，允许重试之前失败的月份
+    fetchingRef.current = new Set();
+
     const cached: (UsageResult | MimoUsageResult)[] = [];
     const missing: { year: number; month: number }[] = [];
 
@@ -168,7 +171,7 @@ function App() {
           setCached(active, year, month, data);
           cached.push(data);
         }
-      } catch { /* 跳过失败的月份，下次再试 */ }
+      } catch { fetchingRef.current.delete(cacheKey(active, year, month)); /* 失败则移除标记，下次重试 */ }
     }
 
     if (cached.length === 0) {
@@ -268,6 +271,7 @@ function App() {
 
   React.useEffect(() => {
     const unlistenPromise = listen("mimo-auth-required", () => {
+      if (providerRef.current !== "mimo") return; // 仅在 MiMo 模式下响应
       setUsageState("error"); setUsageError("MiMo 未登录，请在设置中重新登录小米账号");
       setBalanceState("error"); setBalanceError("MiMo 未登录");
     });
