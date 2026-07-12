@@ -13,12 +13,13 @@ import { t, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
 
 // ─── SettingsPanel ─────────────────────────────────────────
-export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged }: {
+export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged, onReloadCache }: {
   provider: Provider; onProviderChange: (p: Provider) => void; onBack: () => void;
   onUsageLoaded: (usage: UsageResult | MimoUsageResult) => void; onUsageCleared: () => void;
   onRefreshIntervalChanged: (seconds: number) => void; onAutoRefreshChanged: (enabled: boolean) => void;
   onCurrencyChanged: (currency: "cny" | "usd") => void;
   onEfficiencyUnitChanged: (unit: "token_per_currency" | "currency_per_token") => void;
+  onReloadCache?: (p?: Provider) => void;
 }) {
   const [apiKey, setApiKey] = React.useState("");
   const [config, setConfig] = React.useState<AppConfig | null>(null);
@@ -614,6 +615,10 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       <SettingsSection icon={<Settings size={15} />} title={t('settings.cache_title')}>
         <Toggle label={t('settings.auto_clear_cache')} checked={autoClearOldCache} onChange={(e) => { setAutoClearOldCache(e); void invoke<AppConfig>("save_auto_clear_old_cache", { enabled: e }).then(setConfig).catch(() => {}); }} />
         <p>{t('settings.auto_clear_cache_desc')}</p>
+        <div className="settings-actions">
+          <button className="primary" onClick={() => { if (onReloadCache) onReloadCache(); }}>{t('settings.reload_cache')}</button>
+        </div>
+        <p>{t('settings.reload_cache_desc')}</p>
       </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.clear_cache')}>
         <p>{t('settings.clear_cache_desc')}</p>

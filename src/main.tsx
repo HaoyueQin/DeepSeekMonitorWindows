@@ -186,6 +186,41 @@ function App() {
     setUsage(merged); setUsageState("ok"); setUsageError("");
   }, [provider, autoClearOld]);
 
+  /** 强制全量重载：忽略缓存，重取过去 12 个月，与本地比对后覆盖 */
+  const reloadCache = React.useCallback(async (p?: Provider) => {
+    const active = p ?? providerRef.current;
+    setUsageState("loading");
+    const months = yearMonths();
+    if (autoClearOld) clearOldCache(active);
+
+    const fresh: (UsageResult | MimoUsageResult)[] = [];
+    for (const { year, month } of months) {
+      try {
+        const data = active === "deepseek"
+          ? await invoke<UsageResult>("fetch_usage", { month, year })
+          : await invoke<MimoUsageResult>("fetch_mimo_usage", { month, year });
+        if (!data) continue;
+        const key = cacheKey(active, year, month);
+        const old = getCached(active, year, month);
+        // 比对：无缓存或数据不同则覆盖
+        if (!old || JSON.stringify(old) !== JSON.stringify(data)) {
+          setCached(active, year, month, data);
+        }
+        fresh.push(data);
+      } catch { /* 跳过失败的月份 */ }
+    }
+
+    if (fresh.length === 0) {
+      setUsageState("error"); setUsageError("暂无用量数据");
+      return;
+    }
+
+    const merged = active === "deepseek"
+      ? mergeDS(fresh as UsageResult[])
+      : mergeMimo(fresh as MimoUsageResult[]);
+    setUsage(merged); setUsageState("ok"); setUsageError("");
+  }, [autoClearOld]);
+
   /** 增量刷新：仅更新当前月（当日数据可能变化） */
   const refreshCurrentMonth = React.useCallback(async () => {
     const active = providerRef.current;
@@ -303,6 +338,7 @@ function App() {
           onRefreshIntervalChanged={setRefreshIntervalSeconds} onAutoRefreshChanged={setAutoRefreshEnabled}
           onCurrencyChanged={setCurrency}
           onEfficiencyUnitChanged={setEfficiencyUnit}
+          onReloadCache={reloadCache}
         />
       )}
       {view === "detail" && (

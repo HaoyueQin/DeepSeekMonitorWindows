@@ -85,6 +85,8 @@ const translations: Record<string, Record<Lang, string>> = {
   'settings.cache_title': { zh: '缓存管理', en: 'Cache Management' },
   'settings.auto_clear_cache': { zh: '自动清理过期缓存', en: 'Auto-clear old cache' },
   'settings.auto_clear_cache_desc': { zh: '开启后每次启动自动清除超过一年的用量缓存。关闭时缓存持续累积可导出，但主页面仅展示近一年数据。', en: 'When enabled, clears usage cache older than 1 year on each startup. When disabled, cache accumulates for export but only the past year is displayed.' },
+  'settings.reload_cache': { zh: '重新加载缓存', en: 'Reload Cache' },
+  'settings.reload_cache_desc': { zh: '强制重新获取过去一年的所有用量数据，与本地缓存比对后覆盖。用量明细加载失败时可点击重试。', en: 'Force re-fetch all usage data for the past year, compare with local cache and overwrite. Click to retry if usage details fail to load.' },
 
   // 通知
   'notify.title': { zh: '通知', en: 'Notifications' },
