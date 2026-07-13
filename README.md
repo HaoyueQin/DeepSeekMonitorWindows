@@ -6,11 +6,6 @@ DeepSeek / MiMo Monitor Windows 是一个面向 Windows 的 DeepSeek & MiMo API 
 
 郑重声明：本项目不是 DeepSeek 官方产品，也不是 MiMo 官方产品。
 
-## ⚠️ 当前状态（2026-07-12）
-
-**DeepSeek**：余额、用量、趋势图均正常工作，支持过去 12 个月数据缓存。
-
-**MiMo**：余额查询正常，用量明细存在**已知问题**——详情 API (`/api/v1/usage/detail/list`) 需携带 `{year, month}` JSON body 才能返回指定月份数据。目前通过 WebView 代理注入 JS 的方式调用，快速路径（缓存 ph 直接调 API）已修复 body 参数，但**页面提取回退路径偶发失败**，表现为部分月份（如 6 月）用量明细返回空。正在排查中。重新加载缓存按钮可尝试重试。
 
 ## About
 
@@ -199,6 +194,18 @@ Rust 后端依赖：
 ## 更新日志
 
 完整发布记录见 GitHub Releases。
+
+### v2.5.5
+
+- **修复 MiMo 用量查询致命慢速**：解决每轮查询需 30 秒的关键 bug，修复后首次页面提取获取 ph 后，后续查询毫秒级返回。
+  - **修复 fast-path body 无效 JSON**：`format!` 宏 `\\\"` 转义错误导致 POST body 含反斜杠，API 必返回空数据，fast-path 从未生效。
+  - **修复 in_progress 守卫阻塞 fast-path**：`mark_in_progress` 在 `fetch_mimo_usage_detail` 之前加锁，导致 12 个月并行请求中仅第 1 个月能执行，其余 11 个月直接返回空。
+  - **修复 ph 空数据守卫**：`!items.is_empty()` 阻拦了 ph 缓存，无用量月份（如 7 月初）的 ph 永不被保存，fast-path 无法激活。
+  - **修复 in_progress 永不清除**：页面提取完成后未调用 `clear_in_progress`，后续请求被永久阻塞。
+  - **修复 fast-path 失败不 fall through**：超时/通道错误时 `return Err` 而非回退到页面提取。
+  - **后端锁范围缩小**：`tokio::sync::Mutex` 仅 eval JS 瞬间持有，等待回调时不持锁，允许多个 fetch 在 WebView2 中并发 pending。
+  - **前端并行请求**：`loadUsage`/`reloadCache` 从串行 `for...of await` 改为 `Promise.allSettled`，12 月同时请求。
+- **新增验证脚本**：`scripts/verify_mimo_perf.cjs` 验证 MiMo 查询路径代码逻辑正确性。
 
 ### v2.5.4
 

@@ -160,19 +160,26 @@ function App() {
       }
     }
 
-    // 从当前月开始往前取缺失月份（当前月优先，数据可能变化）
+    // 并行请求所有缺失月份，后端 MiMo 全局锁已缩小到仅在 eval JS 瞬间持有，
+    // 多个 fetch 可以在 WebView2 中并发 pending。
     for (const { year, month } of missing) {
-      fetchingRef.current = new Set(fetchingRef.current).add(cacheKey(active, year, month));
-      try {
-        const data = active === "deepseek"
-          ? await invoke<UsageResult>("fetch_usage", { month, year })
-          : await invoke<MimoUsageResult>("fetch_mimo_usage", { month, year });
-        if (data) {
-          setCached(active, year, month, data);
-          cached.push(data);
-        }
-      } catch { fetchingRef.current.delete(cacheKey(active, year, month)); /* 失败则移除标记，下次重试 */ }
+      fetchingRef.current.add(cacheKey(active, year, month));
     }
+    const results = await Promise.allSettled(
+      missing.map(({ year, month }) =>
+        active === "deepseek"
+          ? invoke<UsageResult>("fetch_usage", { month, year })
+          : invoke<MimoUsageResult>("fetch_mimo_usage", { month, year })
+            .then(data => { setCached(active, year, month, data); return data; })
+      )
+    );
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled" && r.value) {
+        cached.push(r.value);
+      } else {
+        fetchingRef.current.delete(cacheKey(active, missing[i].year, missing[i].month));
+      }
+    });
 
     if (cached.length === 0) {
       setUsage(null); setUsageState("error"); setUsageError("暂无用量数据");
@@ -194,21 +201,24 @@ function App() {
     if (autoClearOld) clearOldCache(active);
 
     const fresh: (UsageResult | MimoUsageResult)[] = [];
-    for (const { year, month } of months) {
-      try {
-        const data = active === "deepseek"
-          ? await invoke<UsageResult>("fetch_usage", { month, year })
-          : await invoke<MimoUsageResult>("fetch_mimo_usage", { month, year });
-        if (!data) continue;
-        const key = cacheKey(active, year, month);
+    // 并行请求所有月份
+    const results = await Promise.allSettled(
+      months.map(({ year, month }) =>
+        active === "deepseek"
+          ? invoke<UsageResult>("fetch_usage", { month, year })
+          : invoke<MimoUsageResult>("fetch_mimo_usage", { month, year })
+      )
+    );
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled" && r.value) {
+        const { year, month } = months[i];
         const old = getCached(active, year, month);
-        // 比对：无缓存或数据不同则覆盖
-        if (!old || JSON.stringify(old) !== JSON.stringify(data)) {
-          setCached(active, year, month, data);
+        if (!old || JSON.stringify(old) !== JSON.stringify(r.value)) {
+          setCached(active, year, month, r.value);
         }
-        fresh.push(data);
-      } catch { /* 跳过失败的月份 */ }
-    }
+        fresh.push(r.value);
+      }
+    });
 
     if (fresh.length === 0) {
       setUsageState("error"); setUsageError("暂无用量数据");

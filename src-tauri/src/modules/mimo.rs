@@ -138,12 +138,12 @@ pub async fn fetch_mimo_api_with_method_and_body(
     timeout_secs: u64,
     body: Option<&str>,
 ) -> Result<String, String> {
+    // 不再全程持锁：只在 eval JS 的瞬间持锁，等待回调时不持锁。
+    // WebView2 的 JS fetch 是异步的，多个 fetch 可以同时 pending 并发执行。
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
-    let _lock = lock_guard.lock().await;
-    log::info!("[MiMo] fetch_api lock acquired, path={} method={}", path, method);
 
     let window = ensure_mimo_webview_sync(app)?;
-    log::info!("[MiMo] fetch_api webview ready, label={}", window.label());
+    log::info!("[MiMo] fetch_api webview ready, path={} method={}", path, method);
 
     let cb_port = app
         .state::<Mutex<CallbackServerPort>>()
@@ -171,35 +171,71 @@ pub async fn fetch_mimo_api_with_method_and_body(
     let safe_url = serde_json::to_string(&api_url).unwrap_or_else(|_| "\"\"".to_string());
     let safe_req_id = serde_json::to_string(&req_id).unwrap_or_else(|_| "\"\"".to_string());
     let safe_method = serde_json::to_string(method).unwrap_or_else(|_| "\"GET\"".to_string());
-    let js = format!(
-        r#"(async function() {{
-            try {{
-                var r = await fetch({safe_url}, {{
-                    method: {safe_method},
-                    credentials: 'include',
-                    headers: {{ 'Accept': 'application/json' }}
-                }});
-                var t = await r.text();
-                fetch('http://127.0.0.1:{port}/mimo-callback', {{
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ reqId: {safe_req_id}, data: t }})
-                }});
-            }} catch(e) {{
-                fetch('http://127.0.0.1:{port}/mimo-callback', {{
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ reqId: {safe_req_id}, data: 'ERROR:' + e.message }})
-                }});
-            }}
-        }})()"#,
-        port = cb_port,
-    );
-    window
-        .eval(&js)
-        .map_err(|e| format!("注入脚本失败：{e}"))?;
+    // 构造 JS：如果 body 存在则带上 body（用于 detail API 的 POST 请求）
+    let js = if let Some(body_str) = body {
+        let safe_body = serde_json::to_string(body_str).unwrap_or_else(|_| "\"\"".to_string());
+        format!(
+            r#"(async function() {{
+                try {{
+                    var r = await fetch({safe_url}, {{
+                        method: {safe_method},
+                        credentials: 'include',
+                        headers: {{ 'Accept': 'application/json', 'Content-Type': 'application/json' }},
+                        body: {safe_body}
+                    }});
+                    var t = await r.text();
+                    fetch('http://127.0.0.1:{port}/mimo-callback', {{
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ reqId: {safe_req_id}, data: t }})
+                    }});
+                }} catch(e) {{
+                    fetch('http://127.0.0.1:{port}/mimo-callback', {{
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ reqId: {safe_req_id}, data: 'ERROR:' + e.message }})
+                    }});
+                }}
+            }})()"#,
+            port = cb_port,
+        )
+    } else {
+        format!(
+            r#"(async function() {{
+                try {{
+                    var r = await fetch({safe_url}, {{
+                        method: {safe_method},
+                        credentials: 'include',
+                        headers: {{ 'Accept': 'application/json' }}
+                    }});
+                    var t = await r.text();
+                    fetch('http://127.0.0.1:{port}/mimo-callback', {{
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ reqId: {safe_req_id}, data: t }})
+                    }});
+                }} catch(e) {{
+                    fetch('http://127.0.0.1:{port}/mimo-callback', {{
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ reqId: {safe_req_id}, data: 'ERROR:' + e.message }})
+                    }});
+                }}
+            }})()"#,
+            port = cb_port,
+        )
+    };
+    // 仅在 eval JS 的瞬间持锁，注入后立即释放，允许并发 fetch
+    {
+        let _lock = lock_guard.lock().await;
+        window
+            .eval(&js)
+            .map_err(|e| format!("注入脚本失败：{e}"))?;
+    }
     log::info!("[MiMo] fetch_api JS injected ({} chars), waiting for callback on port {} req={}", js.len(), cb_port, &req_id[..req_id.len().min(20)]);
 
     let timeout = std::time::Duration::from_secs(timeout_secs);
@@ -221,6 +257,8 @@ pub async fn fetch_mimo_api_with_method_and_body(
                                 .and_then(|d| d.get("loginUrl"))
                                 .and_then(|v| v.as_str())
                         });
+                    // 401 需要导航到登录页，持锁避免与其他请求冲突
+                    let _lock = lock_guard.lock().await;
                     if let Some(url) = login_url {
                         // Use serde_json::to_string for proper JS string escaping
                         let safe_url = serde_json::to_string(url).unwrap_or_default();
@@ -419,24 +457,15 @@ pub async fn do_fetch_mimo_usage(
             Some(items) if !items.is_empty() => Some(items),
             Some(_) => None,
             None => {
-                let can_start = cache.lock().unwrap().mark_in_progress(&month_key);
-                if !can_start {
-                    log::info!("[MiMo] detail extraction already in progress, skipping");
-                    return Ok(MimoUsageResult {
-                        models: vec![],
-                        days: vec![],
-                        month_cost,
-                    });
-                }
+                // 不再在此处加 in_progress 守卫——fast-path（在 fetch_mimo_usage_detail 内）
+                // 不需要阻塞其他月份的并发请求。in_progress 守卫已移到 fetch_mimo_usage_detail
+                // 内部的页面提取路径之前。
                 match fetch_mimo_usage_detail(app, month, year).await {
                     Ok(items) if !items.is_empty() => {
                         cache.lock().unwrap().set(items.clone(), &month_key);
                         Some(items)
                     }
-                    _ => {
-                        cache.lock().unwrap().clear_in_progress();
-                        None
-                    }
+                    _ => None
                 }
             }
         }
@@ -609,7 +638,9 @@ async fn fetch_mimo_usage_detail(
         let config = read_stored_config()?;
         if let Some(ref ph) = config.mimo_ph {
             log::debug!("[MiMo] detail: trying cached ph");
-            let body_json = format!("{{\\\"year\\\":{},\\\"month\\\":{}}}", year, month);
+            // 正确构造 JSON body：{"year":2026,"month":6}
+            // 注意：format! 中 \" 产生一个引号字符，而非反斜杠+引号
+            let body_json = format!("{{\"year\":{},\"month\":{}}}", year, month);
             let api_url = format!("/api/v1/usage/detail/list?api-platform_ph={}", ph);
             let full_url = format!("https://platform.xiaomimimo.com{}", api_url);
             let cb_port = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
@@ -640,12 +671,18 @@ async fn fetch_mimo_usage_detail(
                 port = cb_port, safe_url = safe_url, safe_body = safe_body, safe_req_id = safe_req_id,
             );
             let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
-            let _lock = lock_guard.lock().await;
             let window = ensure_mimo_webview_sync(app)?;
-            let _ = window.eval(&js);
+            // 仅在 eval JS 的瞬间持锁，等待回调时不持锁，允许并发 fast-path
+            {
+                let _lock = lock_guard.lock().await;
+                let _ = window.eval(&js);
+            }
             let json = match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
                 Ok(Ok(data)) => data,
-                _ => { return Err("fast-path failed".into()); }
+                _ => {
+                    log::info!("[MiMo] detail fast-path timeout/channel error, falling back to page extraction");
+                    String::new()
+                }
             };
             {
                 log::info!(
@@ -671,7 +708,18 @@ async fn fetch_mimo_usage_detail(
         }
     }
 
-    // 2. 缓存的 ph 失效或不存在 → 导航到用量页面
+    // 2. 缓存的 ph 失效或不存在 → 导航到用量页面（页面提取慢路径）
+    // 页面提取需要导航 WebView，同一时间只能一个在进行。
+    // fast-path 不受此限制——多个 fast-path 可并发（仅 eval JS fetch）。
+    {
+        let cache = app.state::<Mutex<crate::modules::types::MimoDetailCache>>();
+        let month_key = format!("{}-{:02}", year, month);
+        let can_start = cache.lock().unwrap().mark_in_progress(&month_key);
+        if !can_start {
+            log::info!("[MiMo] detail page extraction already in progress, skipping");
+            return Err("page extraction already in progress".into());
+        }
+    }
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
     let window = {
         let _lock = lock_guard.lock().await;
@@ -761,38 +809,49 @@ async fn fetch_mimo_usage_detail(
                 continue;
             } else if !data.is_empty() && !data.starts_with('<') {
                 if let Ok(items) = parse_detail_items(&data) {
-                    if !items.is_empty() {
-                        log::info!("[MiMo] detail OK: {} items", items.len());
-                        // 缓存 ph
-                        let ph_req = format!("__ph_{}", req_id);
-                        let (ptx, prx) = oneshot::channel();
-                        {
-                            let state = app
-                                .state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
-                            let mut map = state.lock().unwrap();
-                            map.insert(ph_req.clone(), ptx);
-                        }
-                        let _ = window.eval(&format!(
-                            r#"try{{var p=window.__mimo_ph||localStorage.getItem('mimo_platform_ph')||'';fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{ph_req}',data:p}})}});}}catch(e){{}}"#,
-                            port = cb_port, ph_req = ph_req,
-                        ));
-                        if let Ok(Ok(ph_val)) =
-                            tokio::time::timeout(std::time::Duration::from_secs(2), prx).await
-                        {
-                            if !ph_val.is_empty() {
-                                if let Ok(mut config) = read_stored_config() {
-                                    config.mimo_ph = Some(ph_val);
-                                    let _ = write_stored_config(&config);
-                                }
+                    // 无论数据是否为空，API 调用本身已成功 → 尝试缓存 ph
+                    // ph 已被 hook 从 API URL 中捕获到 window.__mimo_ph，
+                    // 缓存后下次查询即可走 fast-path 毫秒级返回
+                    let ph_req = format!("__ph_{}", req_id);
+                    let (ptx, prx) = oneshot::channel();
+                    {
+                        let state = app
+                            .state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                        let mut map = state.lock().unwrap();
+                        map.insert(ph_req.clone(), ptx);
+                    }
+                    let _ = window.eval(&format!(
+                        r#"try{{var p=window.__mimo_ph||localStorage.getItem('mimo_platform_ph')||'';fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{ph_req}',data:p}})}});}}catch(e){{}}"#,
+                        port = cb_port, ph_req = ph_req,
+                    ));
+                    if let Ok(Ok(ph_val)) =
+                        tokio::time::timeout(std::time::Duration::from_secs(2), prx).await
+                    {
+                        if !ph_val.is_empty() {
+                            if let Ok(mut config) = read_stored_config() {
+                                config.mimo_ph = Some(ph_val);
+                                let _ = write_stored_config(&config);
+                                log::info!("[MiMo] ph cached for future fast-path use");
                             }
                         }
+                    }
+
+                    if !items.is_empty() {
+                        log::info!("[MiMo] detail OK: {} items", items.len());
+                        let cache = app.state::<Mutex<crate::modules::types::MimoDetailCache>>();
+                        cache.lock().unwrap().clear_in_progress();
                         return Ok(items);
                     }
+                    log::info!("[MiMo] detail API returned empty data (no usage this month), ph cached, continuing poll...");
                 }
             }
         }
     }
 
+    {
+        let cache = app.state::<Mutex<crate::modules::types::MimoDetailCache>>();
+        cache.lock().unwrap().clear_in_progress();
+    }
     Err("无法获取用量详情，请确认已登录 MiMo".to_string())
 }
 

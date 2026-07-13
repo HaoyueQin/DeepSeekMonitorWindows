@@ -1,7 +1,7 @@
 # DeepSeekMonitorWindows — 交接文档
 
-> 更新日期：2026-07-12
-> 当前版本：v2.5.4（commit `f6ea3ba`，已推送但未发布 Release）
+> 更新日期：2026-07-13
+> 当前版本：v2.5.5
 > 远端仓库：https://github.com/HaoyueQin/DeepSeekMonitorWindows.git
 > 上游仓库：https://github.com/Joyi-code/DeepSeekMonitorWindows.git
 
@@ -120,7 +120,7 @@ MiMo 没有公开 API Key，使用**隐藏 WebView2** 窗口（`mimo-sync`）登
 
 ---
 
-## 五、前端缓存架构（v2.5.4 新设计）
+## 五、前端缓存架构（v2.5.5 新设计）
 
 ### 5.1 存储格式
 每月独立缓存：`dsm-usage-{provider}-{YYYY-MM}`（如 `dsm-usage-mimo-2026-06`）
@@ -144,30 +144,12 @@ MiMo 没有公开 API Key，使用**隐藏 WebView2** 窗口（`mimo-sync`）登
 
 ## 六、当前已知问题
 
-### 6.1 MiMo 用量明细偶发加载失败 ⚠️ 最高优先级
-- **现象**：部分历史月份（如 6 月）的用量明细返回空，图表显示全 0
-- **排查进展**：
-  - 快速路径 body 参数已修复（`{"year":2026,"month":6}`）
-  - 页面提取路径的 `?month=YYYY-MM` URL 参数对 MiMo SPA 无效
-  - 原因可能是 ph token 过期、MiMo 服务端限制或 WebView 状态异常
-- **复现方式**：切到 MiMo，6 月图表无数据；点击重新加载缓存可能恢复
-- **解决方向**：
-  1. 检查 MiMo 网站是否对旧月份有查询限制
-  2. 尝试在页面中通过 JS 模拟点击月份选择器
-  3. 研究是否有其他 API 端点支持日期范围查询
-  4. 增加更详细的日志捕获 API 原始响应
-
-### 6.2 MiMo 首次启动 TIMEOUT
+### 6.1 MiMo 首次启动 TIMEOUT
 - 应用启动后第一次 MiMo 余额查询可能超时（WebView 尚未登录）
 - 30 秒后重试通常恢复
 - 可考虑：启动时静默预热 WebView
 
-### 6.3 快速路径 `Content-Type is not supported`
-- 部分情况下 ph 缓存的快速路径返回 400
-- 已修复 body 参数，但偶发仍失败
-- 失败后会走页面提取路径（慢但可靠）
-
-### 6.4 构建签名
+### 6.2 构建签名
 - Release 构建需要 `TAURI_SIGNING_PRIVATE_KEY` 环境变量
 - 私钥路径：`~/.tauri/deepseek-monitor.key`
 - 构建命令：`TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/deepseek-monitor.key) TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" npx tauri build`
@@ -176,13 +158,7 @@ MiMo 没有公开 API Key，使用**隐藏 WebView2** 窗口（`mimo-sync`）登
 
 ## 七、未来工作
 
-### 7.1 急需修复
-- [ ] 彻底解决 MiMo 6 月/历史月份数据加载问题
-- [ ] MiMo 启动预热，避免首次超时
-- [ ] `fetch_mimo_api_with_method_and_body` 中 `body` 参数实际使用（目前仅快速路径自行构造 JS）
-- [ ] 构建脚本化，不需要每次手动设环境变量
-
-### 7.2 功能增强
+### 7.1 功能增强
 - [ ] MiMo 支持更早历史月份（当前仅依赖 API 能返回的范围）
 - [ ] 用量数据导出支持日期范围筛选
 - [ ] 图表支持柱状图/折线图切换
@@ -257,7 +233,7 @@ npx tauri build
 | 设置功能 | 基础 | 窗口置顶/缓存管理/主题/货币/效率单位/通知冷却 |
 | 国际化 | 无 | zh/en 双语 |
 | 自动更新 | 无 | Tauri updater + GitHub Releases |
-| 版本号 | v2.5.3 | v2.5.4 |
+| 版本号 | v2.5.3 | v2.5.5 |
 | 关系 | — | 独立开发，不定期同步上游 |
 
 **注意**：本 Fork 已大幅偏离上游，合并上游变更时需要仔细处理冲突。
