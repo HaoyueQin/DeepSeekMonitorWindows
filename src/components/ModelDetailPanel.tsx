@@ -2,6 +2,7 @@ import React from "react";
 import { Brain, X, Zap } from "lucide-react";
 import type { ModelName, BalanceState, UsageResult, MimoUsageResult, Provider } from "../types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, addDays, dateKey, modelDisplayName, modelIcon } from "../utils";
+import { t, tpl } from "../i18n";
 
 // ─── ModelDetailPanel ──────────────────────────────────────
 export function ModelDetailPanel({ model, usage, usageState, onBack, provider, currency, exchangeRate, efficiencyUnit }: {
@@ -94,28 +95,28 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
   const canGoForward = weekOffset < 0;
   const MAX_WEEKS_BACK = 52;
   const canGoBack = weekOffset > -(MAX_WEEKS_BACK + 1);
-  const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
+  const weekLabel = weekOffset === 0 ? t("chart.this_week") : weekOffset === -1 ? t("chart.last_week") : tpl("chart.weeks_ago", { n: -weekOffset });
 
   return (
     <section className="panel detail-panel" data-testid="detail-panel">
-      <button className="floating-close" onClick={onBack} aria-label="返回主面板"><X size={20} /></button>
+      <button className="floating-close" onClick={onBack} aria-label={t("detail.back")}><X size={20} /></button>
       <article className="card detail-hero" data-tauri-drag-region>
         <div className={`model-badge large ${tintClass}`}>
           {isDeepSeek ? (isFlash ? <Zap size={34} fill="currentColor" /> : <Brain size={33} />) : <Zap size={34} fill="currentColor" />}
         </div>
-        <div><h1>{title}</h1><p>{cost} · 命中 {avgHitRate}% · {avgRatio}</p></div>
+        <div><h1>{title}</h1><p>{cost} · {t("usage.cache_hit")} {avgHitRate}% · {avgRatio}</p></div>
       </article>
       <div className="detail-metrics">
-        <article className="card metric-card"><span>API 请求次数</span><strong className={tintClass}>{detailModelData ? fmtInt(detailModelData.requestCount) : "—"}</strong></article>
-        <article className="card metric-card"><span>Tokens</span><strong className={tintClass}>{totalText}</strong></article>
+        <article className="card metric-card"><span>{t("detail.requests")}</span><strong className={tintClass}>{detailModelData ? fmtInt(detailModelData.requestCount) : "—"}</strong></article>
+        <article className="card metric-card"><span>{t("app.tokens")}</span><strong className={tintClass}>{totalText}</strong></article>
       </div>
       <article className="card detail-chart">
         <div className="detail-chart-head">
-          <div><h2>按日 Token 消耗</h2><span>{rangeText}</span></div>
+          <div><h2>{t("detail.daily")}</h2><span>{rangeText}</span></div>
           <div className="chart-nav">
-            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title="上一周">‹</button>
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title={t("chart.prev_week")}>‹</button>
             <span className="chart-nav-label">{weekLabel}</span>
-            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">›</button>
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title={t("chart.next_week")}>›</button>
           </div>
         </div>
         {usageState === "ok" && points.length > 0 ? (
@@ -126,11 +127,11 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
                   {hoveredIdx === idx && (
                     <div className={`bar-tooltip${idx <= 1 ? " align-left" : idx >= points.length - 2 ? " align-right" : ""}`}>
                       <div className="bar-tooltip-head"><span className="bar-tooltip-date">{point.date}</span><strong>{fmtInt(point.total)} tokens</strong></div>
-                      <span className="bar-tooltip-row"><i className="dot hit" />输入（命中缓存）<strong>{fmtInt(point.hit)} tokens</strong></span>
-                      <span className="bar-tooltip-row"><i className="dot miss" />输入（未命中缓存）<strong>{fmtInt(point.miss)} tokens</strong></span>
-                      <span className="bar-tooltip-row"><i className="dot response" />输出<strong>{fmtInt(point.response)} tokens</strong></span>
-                      <span className="bar-tooltip-row" style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(var(--fg), 0.1)' }}>缓存命中 <strong>{point.hit + point.miss > 0 ? ((point.hit / (point.hit + point.miss)) * 100).toFixed(3) : "0"}%</strong></span>
-                      <span className="bar-tooltip-row">平均单价 <strong>
+                      <span className="bar-tooltip-row"><i className="dot hit" />{t("chart.input_hit")}<strong>{fmtInt(point.hit)} tokens</strong></span>
+                      <span className="bar-tooltip-row"><i className="dot miss" />{t("chart.input_miss")}<strong>{fmtInt(point.miss)} tokens</strong></span>
+                      <span className="bar-tooltip-row"><i className="dot response" />{t("chart.output")}<strong>{fmtInt(point.response)} tokens</strong></span>
+                      <span className="bar-tooltip-row" style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(var(--fg), 0.1)' }}>{t("usage.cache_hit")} <strong>{point.hit + point.miss > 0 ? ((point.hit / (point.hit + point.miss)) * 100).toFixed(3) : "0"}%</strong></span>
+                      <span className="bar-tooltip-row">{t("chart.avg_price")} <strong>
                         {point.cost > 0 && point.total > 0
                           ? efficiencyUnit === "token_per_currency"
                             ? `${(point.total / point.cost / 1_000_000).toFixed(2)} MT/${sym}`
@@ -156,14 +157,14 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
               ))}
             </div>
             <div className="chart-legend-bottom">
-              <span className="chart-legend-item"><i className="dot hit" />命中</span>
-              <span className="chart-legend-item"><i className="dot miss" />未命中</span>
-              <span className="chart-legend-item"><i className="dot response" />输出</span>
+              <span className="chart-legend-item"><i className="dot hit" />{t("chart.hit")}</span>
+              <span className="chart-legend-item"><i className="dot miss" />{t("chart.miss")}</span>
+              <span className="chart-legend-item"><i className="dot response" />{t("chart.output")}</span>
             </div>
           </>
         ) : (
           <div className="chart-placeholder">
-            {usageState === "nokey" ? "未配置用量 Token" : usageState === "loading" ? "查询中…" : "暂无数据"}
+            {usageState === "nokey" ? t("app.unconfigured_usage_token") : usageState === "loading" ? t("app.loading") : t("app.no_data")}
           </div>
         )}
       </article>

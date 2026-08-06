@@ -4,10 +4,78 @@
 
 use serde::{Deserialize, Serialize};
 
+// ─── 统一错误类型 ─────────────────────────────────────────
+
+/// 全后端统一的结构化错误。
+/// 内部模块返回 `Result<T, AppError>`，Tauri 命令层通过 `From<AppError> for String`
+/// 自动转为前端可读的错误信息。
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("未配置 API Key")]
+    NoApiKey,
+    #[error("未配置用量 Token")]
+    NoUsageToken,
+    #[error("网络请求失败：{0}")]
+    Network(String),
+    #[error("HTTP 状态码 {0}")]
+    Http(u16),
+    #[error("解析失败：{0}")]
+    Parse(String),
+    #[error("认证失败：{0}")]
+    Auth(String),
+    #[error("请求超时")]
+    Timeout,
+    #[error("配置错误：{0}")]
+    Config(String),
+    #[error("IO 错误：{0}")]
+    Io(String),
+    #[error("凭据加解密失败：{0}")]
+    Crypto(String),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for AppError {
+    fn from(s: String) -> Self {
+        AppError::Other(s)
+    }
+}
+
+impl From<&str> for AppError {
+    fn from(s: &str) -> Self {
+        AppError::Other(s.to_string())
+    }
+}
+
+impl From<AppError> for String {
+    fn from(e: AppError) -> String {
+        e.to_string()
+    }
+}
+
 // ─── 配置 ─────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct AccountConfig {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub usage_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BalanceHistoryEntry {
+    pub provider: String, // "deepseek" | "mimo"
+    pub date: String,     // YYYY-MM-DD
+    pub balance: f64,
+    pub currency: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct StoredConfig {
+    #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub usage_token: Option<String>,
@@ -17,9 +85,11 @@ pub struct StoredConfig {
     pub mimo_token: Option<String>,
     #[serde(default)]
     pub mimo_ph: Option<String>,
+    #[serde(default)]
     pub refresh_interval_seconds: u64,
     #[serde(default)]
     pub auto_refresh_enabled: bool,
+    #[serde(default)]
     pub autostart: bool,
     #[serde(default)]
     pub window_width: Option<f64>,
@@ -49,6 +119,15 @@ pub struct StoredConfig {
     pub always_on_top: bool,
     #[serde(default = "default_auto_clear")]
     pub auto_clear_old_cache: bool,
+    // ── v2.6.0 新增 ──
+    #[serde(default)]
+    pub usage_history_months: u32, // 12 = 默认
+    #[serde(default)]
+    pub accounts: Vec<AccountConfig>,
+    #[serde(default)]
+    pub active_account: Option<String>,
+    #[serde(default)]
+    pub balance_history: Vec<BalanceHistoryEntry>,
 }
 
 fn default_theme() -> String { "light".to_string() }
@@ -57,6 +136,16 @@ fn default_efficiency_unit() -> String { "token_per_currency".to_string() }
 fn default_provider() -> String { "deepseek".to_string() }
 fn default_notify_cooldown() -> u64 { 30 }
 fn default_auto_clear() -> bool { true }
+
+/// 暴露给前端的账户摘要（不含密钥）
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSummary {
+    pub id: String,
+    pub name: String,
+    pub api_key_configured: bool,
+    pub usage_token_configured: bool,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,6 +179,12 @@ pub struct AppConfig {
     pub always_on_top: bool,
     #[serde(default = "default_auto_clear")]
     pub auto_clear_old_cache: bool,
+    #[serde(default)]
+    pub usage_history_months: u32,
+    #[serde(default)]
+    pub accounts: Vec<AccountSummary>,
+    #[serde(default)]
+    pub active_account_id: Option<String>,
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────
@@ -224,7 +319,6 @@ pub struct MimoDetailCache {
     items: Option<(std::time::Instant, Vec<UsageDetailItem>)>,
     month_key: Option<String>,
     in_progress: bool,
-    in_progress_month: Option<String>,
 }
 
 impl MimoDetailCache {
@@ -233,7 +327,6 @@ impl MimoDetailCache {
             items: None,
             month_key: None,
             in_progress: false,
-            in_progress_month: None,
         }
     }
     pub fn get(&self, max_age: std::time::Duration, month: &str) -> Option<Vec<UsageDetailItem>> {
@@ -259,12 +352,11 @@ impl MimoDetailCache {
         self.month_key = Some(month.to_string());
         self.in_progress = false;
     }
-    pub fn mark_in_progress(&mut self, month: &str) -> bool {
+    pub fn mark_in_progress(&mut self) -> bool {
         if self.in_progress {
             return false;
         }
         self.in_progress = true;
-        self.in_progress_month = Some(month.to_string());
         true
     }
     pub fn clear_in_progress(&mut self) {

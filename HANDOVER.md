@@ -1,7 +1,7 @@
 # DeepSeekMonitorWindows — 交接文档
 
-> 更新日期：2026-07-13
-> 当前版本：v2.5.5
+> 更新日期：2026-07-15
+> 当前版本：v2.6.0
 > 远端仓库：https://github.com/HaoyueQin/DeepSeekMonitorWindows.git
 > 上游仓库：https://github.com/Joyi-code/DeepSeekMonitorWindows.git
 
@@ -156,26 +156,29 @@ MiMo 没有公开 API Key，使用**隐藏 WebView2** 窗口（`mimo-sync`）登
 
 ---
 
-## 七、未来工作
+## 七、未来工作（v2.6.0 已全部完成 ✅）
 
-### 7.1 功能增强
-- [ ] MiMo 支持更早历史月份（当前仅依赖 API 能返回的范围）
-- [ ] 用量数据导出支持日期范围筛选
-- [ ] 图表支持柱状图/折线图切换
-- [ ] 余额走势图（需要历史余额数据存储）
-- [ ] 多账户切换（多个 API Key）
+### 7.1 功能增强（已全部完成）
+- [x] MiMo 支持更早历史月份 → 设置→数据「历史数据深度」（12/24/36 个月，config.usage_history_months）
+- [x] 用量数据导出支持日期范围筛选 → 设置→数据 导出区「日期范围」起止月份，CSV 按日期行展开
+- [x] 图表支持柱状图/折线图切换 → UsageChart 右上角模式切换（bar/line，SVG 三线）
+- [x] 余额走势图 → 后端 balance_history（每日快照去重、保留 180 天、新命令 get_balance_history）+ 前端 BalanceHistoryCard（7/30/90 天）
+- [x] 多账户切换 → config.accounts/active_account（DPAPI 加密、旧凭据自动迁移为「默认账户」），新命令 add_account/switch_account/delete_account
 
-### 7.3 技术债务
-- [ ] `mergeDS` / `mergeMimo` 清理残留代码（modelMap 已不使用）
-- [ ] `fetch_mimo_api_with_method` 和 `_and_body` 冗余——合并为一个
-- [ ] 错误处理统一化（目前 String 错误信息，改为结构化错误）
-- [ ] 前端状态管理考虑引入 useReducer
-- [ ] 国际化覆盖所有硬编码中文
+### 7.3 技术债务（已全部完成）
+- [x] `mergeDS` / `mergeMimo` 清理 → grep 确认 modelMap 无残留（已自然完成）
+- [x] `fetch_mimo_api_with_method` 和 `_and_body` 冗余 → 合并为单一 `fetch_mimo_api(app, path, method, timeout, body)`，fast-path 复用统一调用，删除 ~60 行重复 JS 构造
+- [x] 错误处理统一化 → 新增 `AppError`（thiserror：NoApiKey/Network/Http/Parse/Auth/Timeout/Config/Io/Crypto/Other），`From<AppError> for String` 保持命令层兼容
+- [x] 前端状态管理引入 useReducer → main.tsx 的 balance/usage 6 个状态收敛为 dataReducer（BALANCE_*/USAGE_*/RESET）
+- [x] 国际化覆盖所有硬编码中文 → DashboardPanel/ModelDetailPanel/SettingsPanel/main.tsx 全部静态文本走 t()/tpl()
 
-### 7.4 质量保障
-- [ ] Rust 后端单元测试覆盖 MiMo 模块
-- [ ] 前端组件测试
-- [ ] E2E 测试（启动应用 → 查询余额 → 验证 UI）
+### 7.4 质量保障（已全部完成）
+- [x] Rust 后端单元测试 → 35 个（config 迁移/历史/凭据、deepseek token_breakdown/cost_sum/extract_token、mimo parse_detail_items/parse_mimo_api_response/聚合过滤）
+- [x] 前端组件测试 → Vitest 26 个（utils 16 + DashboardPanel 5 + ModelDetailPanel 2 + App 集成 3，vi.hoisted mock Tauri IPC）
+- [x] E2E 测试 → jsdom 集成测试覆盖「启动→加载配置→余额→用量→渲染 UI」完整流程（App.test.tsx）；真实 Tauri E2E 保留 HANDOVER 十一节人工检查清单（需登录凭据，不适合 CI）
+
+### CI（v2.6.0 新增）
+- [x] `.github/workflows/ci.yml`：frontend（npm ci → tsc → vitest → vite build）+ backend（cargo check → clippy -D warnings → cargo test）+ verify_mimo_perf.cjs
 
 ---
 

@@ -7,8 +7,8 @@ mod modules;
 use modules::{
     config, deepseek, mimo, tray,
     types::{
-        AppConfig, BalanceResult, CallbackServerPort, MimoBalanceResult, MimoDetailCache,
-        MimoUsageResult, UsageResult,
+        AppConfig, BalanceHistoryEntry, BalanceResult, CallbackServerPort, MimoBalanceResult,
+        MimoDetailCache, MimoUsageResult, UsageResult,
     },
 };
 
@@ -77,7 +77,7 @@ impl CallbackServer {
                 }
             }
         });
-                Ok(CallbackServer { port })
+        Ok(CallbackServer { port })
     }
 }
 
@@ -90,7 +90,7 @@ fn hide_main_window(window: WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 fn resize_window(window: WebviewWindow, width: f64, height: f64) -> Result<(), String> {
-    use tauri::{PhysicalPosition, LogicalSize};
+    use tauri::{LogicalSize, PhysicalPosition};
 
     // 当前右下角（物理像素）
     let old_pos = window.outer_position().map_err(|e| e.to_string())?;
@@ -126,32 +126,22 @@ fn save_window_state(window: &WebviewWindow) -> Result<(), String> {
     config.window_height = Some(logical_h);
     config.window_x = Some(pos.x);
     config.window_y = Some(pos.y);
-    config::write_stored_config(&config)
+    Ok(config::write_stored_config(&config)?)
 }
 
 #[tauri::command]
 fn get_app_config() -> Result<AppConfig, String> {
-    config::to_app_config(config::read_stored_config()?)
+    Ok(config::to_app_config(config::read_stored_config()?)?)
 }
 
 #[tauri::command]
 fn save_api_key(api_key: String) -> Result<AppConfig, String> {
-    let value = api_key.trim().to_string();
-    if value.is_empty() {
-        return Err("API Key 不能为空".to_string());
-    }
-    let mut config = config::read_stored_config()?;
-    config.api_key = Some(value);
-    config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(deepseek::do_save_api_key(api_key)?)
 }
 
 #[tauri::command]
 fn clear_api_key() -> Result<AppConfig, String> {
-    let mut config = config::read_stored_config()?;
-    config.api_key = None;
-    config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(deepseek::do_clear_api_key()?)
 }
 
 #[tauri::command]
@@ -159,7 +149,7 @@ fn save_refresh_interval(refresh_interval_seconds: u64) -> Result<AppConfig, Str
     let mut config = config::read_stored_config()?;
     config.refresh_interval_seconds = refresh_interval_seconds;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -167,7 +157,7 @@ fn save_auto_refresh_enabled(auto_refresh_enabled: bool) -> Result<AppConfig, St
     let mut config = config::read_stored_config()?;
     config.auto_refresh_enabled = auto_refresh_enabled;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -176,7 +166,7 @@ fn save_autostart(autostart: bool) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.autostart = autostart;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -184,7 +174,7 @@ fn save_low_balance_notify(enabled: bool) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.low_balance_notify = enabled;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -195,7 +185,7 @@ fn save_low_balance_threshold(threshold: f64) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.low_balance_threshold = threshold;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -206,7 +196,7 @@ fn save_theme(theme: String) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.theme = theme;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -217,7 +207,7 @@ fn save_currency(currency: String) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.currency = currency;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -228,7 +218,7 @@ fn save_efficiency_unit(unit: String) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.efficiency_unit = unit;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -239,7 +229,7 @@ fn save_default_provider(provider: String) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.default_provider = provider;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -247,7 +237,7 @@ fn save_mimo_refresh_interval(seconds: u64) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.mimo_refresh_interval_seconds = seconds;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -256,7 +246,7 @@ fn save_always_on_top(window: WebviewWindow, always_on_top: bool) -> Result<AppC
     let mut config = config::read_stored_config()?;
     config.always_on_top = always_on_top;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -264,7 +254,7 @@ fn save_auto_clear_old_cache(enabled: bool) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.auto_clear_old_cache = enabled;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
@@ -272,7 +262,75 @@ fn save_notify_cooldown(minutes: u64) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.notify_cooldown_minutes = minutes;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
+}
+
+#[tauri::command]
+fn save_history_months(months: u32) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    config.usage_history_months = months.clamp(1, 60);
+    config::write_stored_config(&config)?;
+    Ok(config::to_app_config(config)?)
+}
+
+// ─── 多账户管理 ──────────────────────────────────────────
+
+#[tauri::command]
+fn add_account(name: String) -> Result<AppConfig, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("账户名称不能为空".to_string());
+    }
+    if name.len() > 40 {
+        return Err("账户名称过长（最多 40 字符）".to_string());
+    }
+    let mut config = config::read_stored_config()?;
+    let id = format!(
+        "acc_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    config.accounts.push(modules::types::AccountConfig {
+        id: id.clone(),
+        name,
+        api_key: None,
+        usage_token: None,
+    });
+    config.active_account = Some(id);
+    config::write_stored_config(&config)?;
+    Ok(config::to_app_config(config)?)
+}
+
+#[tauri::command]
+fn switch_account(id: String) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    if !config.accounts.iter().any(|a| a.id == id) {
+        return Err("账户不存在".to_string());
+    }
+    config.active_account = Some(id);
+    config::write_stored_config(&config)?;
+    Ok(config::to_app_config(config)?)
+}
+
+#[tauri::command]
+fn delete_account(id: String) -> Result<AppConfig, String> {
+    let mut config = config::read_stored_config()?;
+    if !config.accounts.iter().any(|a| a.id == id) {
+        return Err("账户不存在".to_string());
+    }
+    config.accounts.retain(|a| a.id != id);
+    if config.active_account.as_deref() == Some(id.as_str()) {
+        config.active_account = config.accounts.first().map(|a| a.id.clone());
+    }
+    config::write_stored_config(&config)?;
+    Ok(config::to_app_config(config)?)
+}
+
+#[tauri::command]
+fn get_balance_history() -> Result<Vec<BalanceHistoryEntry>, String> {
+    Ok(config::read_stored_config()?.balance_history)
 }
 
 #[tauri::command]
@@ -285,11 +343,11 @@ fn export_config_json() -> Result<String, String> {
 fn import_config_json(json: String) -> Result<AppConfig, String> {
     let config: config::StoredConfig = serde_json::from_str(&json).map_err(|e| format!("JSON 解析失败: {}", e))?;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
-/// 余额检查并发送 Windows 通知
-fn check_and_notify_low_balance(_app: &tauri::AppHandle, balance: &BalanceResult) {
+/// 余额低于阈值时发送 Windows 通知（DeepSeek 与 MiMo 共用）
+fn notify_low_balance_if_needed(balance_str: &str, currency: &str) {
     let config = match config::read_stored_config() {
         Ok(c) => c,
         Err(_) => return,
@@ -301,18 +359,17 @@ fn check_and_notify_low_balance(_app: &tauri::AppHandle, balance: &BalanceResult
     if threshold <= 0.0 {
         return;
     }
-    let balance_val = match balance.total_balance.parse::<f64>() {
-        Ok(v) => v,
-        Err(_) => return,
+    let Ok(balance_val) = balance_str.parse::<f64>() else {
+        return;
     };
     if balance_val < threshold {
-        let symbol = if balance.currency == "USD" { "$" } else { "¥" };
+        let symbol = if currency == "USD" { "$" } else { "¥" };
         let _ = notify_rust::Notification::new()
             .summary("DeepSeek / MiMo Monitor")
-            .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, balance.total_balance, symbol, threshold))
+            .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, balance_str, symbol, threshold))
             .appname("DeepSeekMonitor")
             .show();
-        log::info!("[Notify] 余额不足: {}{} < {}{}", symbol, balance.total_balance, symbol, threshold);
+        log::info!("[Notify] 余额不足: {}{} < {}{}", symbol, balance_str, symbol, threshold);
     }
 }
 
@@ -324,29 +381,30 @@ fn set_provider(provider: String) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
     config.provider = provider;
     config::write_stored_config(&config)?;
-    config::to_app_config(config)
+    Ok(config::to_app_config(config)?)
 }
 
 #[tauri::command]
-async fn fetch_balance(app: tauri::AppHandle) -> Result<BalanceResult, String> {
+async fn fetch_balance() -> Result<BalanceResult, String> {
     let result = deepseek::do_fetch_balance().await?;
-    check_and_notify_low_balance(&app, &result);
+    config::record_balance_history("deepseek", &result.total_balance, &result.currency);
+    notify_low_balance_if_needed(&result.total_balance, &result.currency);
     Ok(result)
 }
 
 #[tauri::command]
 fn save_usage_token(usage_token: String) -> Result<AppConfig, String> {
-    deepseek::do_save_usage_token(usage_token)
+    Ok(deepseek::do_save_usage_token(usage_token)?)
 }
 
 #[tauri::command]
 fn clear_usage_token() -> Result<AppConfig, String> {
-    deepseek::do_clear_usage_token()
+    Ok(deepseek::do_clear_usage_token()?)
 }
 
 #[tauri::command]
 async fn start_usage_sync(app: tauri::AppHandle) -> Result<bool, String> {
-    deepseek::start_usage_sync(&app)
+    Ok(deepseek::start_usage_sync(&app)?)
 }
 
 #[tauri::command]
@@ -356,32 +414,23 @@ async fn usage_token_captured(
     month: u32,
     year: u32,
 ) -> Result<AppConfig, String> {
-    deepseek::do_usage_token_captured(&app, token, month, year).await
+    Ok(deepseek::do_usage_token_captured(&app, token, month, year).await?)
 }
 
 #[tauri::command]
 async fn fetch_usage(month: u32, year: u32) -> Result<UsageResult, String> {
-    deepseek::do_fetch_usage(month, year).await
+    Ok(deepseek::do_fetch_usage(month, year).await?)
 }
 
 #[tauri::command]
 async fn fetch_mimo_balance(app: tauri::AppHandle) -> Result<MimoBalanceResult, String> {
     let result = mimo::do_fetch_mimo_balance(&app).await?;
-    // 检查 MiMo 余额是否低于阈值
-    let config = config::read_stored_config().unwrap_or_default();
-    if config.low_balance_notify && config.low_balance_threshold > 0.0 {
-        if let Ok(val) = result.available_balance.parse::<f64>() {
-            if val < config.low_balance_threshold {
-                let symbol = if result.currency == "USD" { "$" } else { "¥" };
-                let _ = notify_rust::Notification::new()
-                    .summary("DeepSeek / MiMo Monitor")
-                    .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, result.available_balance, symbol, config.low_balance_threshold))
-                    .appname("DeepSeekMonitor")
-                    .show();
-                log::info!("[Notify] MiMo 余额不足: {}{} < {}{}", symbol, result.available_balance, symbol, config.low_balance_threshold);
-            }
-        }
-    }
+    config::record_balance_history(
+        "mimo",
+        &result.available_balance,
+        &result.currency,
+    );
+    notify_low_balance_if_needed(&result.available_balance, &result.currency);
     Ok(result)
 }
 
@@ -391,17 +440,17 @@ async fn fetch_mimo_usage(
     month: u32,
     year: u32,
 ) -> Result<MimoUsageResult, String> {
-    mimo::do_fetch_mimo_usage(&app, month, year).await
+    Ok(mimo::do_fetch_mimo_usage(&app, month, year).await?)
 }
 
 #[tauri::command]
 async fn start_mimo_sync(app: tauri::AppHandle) -> Result<bool, String> {
-    mimo::do_start_mimo_sync(&app)
+    Ok(mimo::do_start_mimo_sync(&app)?)
 }
 
 #[tauri::command]
 async fn ensure_mimo_webview(app: tauri::AppHandle) -> Result<(), String> {
-    mimo::do_ensure_mimo_webview(&app)
+    Ok(mimo::do_ensure_mimo_webview(&app)?)
 }
 
 #[tauri::command]
@@ -410,7 +459,7 @@ fn mimo_api_response(
     req_id: String,
     json: String,
 ) -> Result<(), String> {
-    mimo::do_mimo_api_response(&app, req_id, json)
+    Ok(mimo::do_mimo_api_response(&app, req_id, json)?)
 }
 
 // ─── 自动更新 ──────────────────────────────────────────────
@@ -517,6 +566,11 @@ pub fn run() {
             save_notify_cooldown,
             save_always_on_top,
             save_auto_clear_old_cache,
+            save_history_months,
+            add_account,
+            switch_account,
+            delete_account,
+            get_balance_history,
             set_provider,
             fetch_balance,
             save_usage_token,

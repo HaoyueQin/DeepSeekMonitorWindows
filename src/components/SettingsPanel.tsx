@@ -5,25 +5,30 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   BarChart3, CheckCircle2, Info, KeyRound, Power, Settings, X,
-  User, Monitor, Bell, Palette, Globe, ChevronRight, ChevronLeft,
+  User, Monitor, Bell, Palette, Globe, ChevronRight,
 } from "lucide-react";
-import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
+import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, AccountSummary } from "../types";
 import { fmtMoney, addDays, previousMonth } from "../utils";
-import { t, getLang, setLang, LANG_OPTIONS } from "../i18n";
+import { t, tpl, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
 
 // ─── SettingsPanel ─────────────────────────────────────────
-export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged, onReloadCache }: {
+export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged, onReloadCache, accounts, activeAccountId, onAccountsChanged, historyMonths, onHistoryMonthsChanged }: {
   provider: Provider; onProviderChange: (p: Provider) => void; onBack: () => void;
   onUsageLoaded: (usage: UsageResult | MimoUsageResult) => void; onUsageCleared: () => void;
   onRefreshIntervalChanged: (seconds: number) => void; onAutoRefreshChanged: (enabled: boolean) => void;
   onCurrencyChanged: (currency: "cny" | "usd") => void;
   onEfficiencyUnitChanged: (unit: "token_per_currency" | "currency_per_token") => void;
   onReloadCache?: (p?: Provider) => void;
+  accounts: AccountSummary[];
+  activeAccountId: string | null;
+  onAccountsChanged: (accounts: AccountSummary[], activeId: string | null) => void;
+  historyMonths: number;
+  onHistoryMonthsChanged: (months: number) => void;
 }) {
   const [apiKey, setApiKey] = React.useState("");
   const [config, setConfig] = React.useState<AppConfig | null>(null);
-  const [status, setStatus] = React.useState("正在读取本地配置");
+  const [status, setStatus] = React.useState(t("settings.reading_config"));
   const [busy, setBusy] = React.useState(false);
   const [refresh, setRefresh] = React.useState(60);
   const [autoRefresh, setAutoRefresh] = React.useState(false);
@@ -58,13 +63,32 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [autoClearOldCache, setAutoClearOldCache] = React.useState(true);
   const [reloading, setReloading] = React.useState(false);
   const [cacheMsg, setCacheMsg] = React.useState("");
+  const [newAccountName, setNewAccountName] = React.useState("");
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   const PRESET_REFRESH = [60, 300, 1800, 3600];
   const PRESET_COOLDOWN = [10, 30, 60, 180, 360];
 
   React.useEffect(() => {
-    void invoke<AppConfig>("get_app_config").then((c) => { setConfig(c); const ri = c.refreshIntervalSeconds || 60; setRefresh(ri); setCustomDsRefresh(!PRESET_REFRESH.includes(ri)); setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0); setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30)); setAutoRefresh(c.autoRefreshEnabled); setAutostart(c.autostart); setAlwaysOnTop(c.alwaysOnTop || false); setLowBalanceNotify(c.lowBalanceNotify || false); setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00)); setStatus(c.apiKeyConfigured ? `已配置 ${c.apiKeyPreview}` : "未配置 API Key"); setUsageStatus(c.usageTokenConfigured ? "用量 Token 已配置" : "未配置用量 Token"); setTheme(c.theme || "light"); setCurrency(c.currency || "cny"); setEfficiencyUnit(c.efficiencyUnit || "token_per_currency"); setAutoClearOldCache(c.autoClearOldCache ?? true); }).catch(() => setStatus("浏览器预览模式"));
+    void invoke<AppConfig>("get_app_config").then((c) => {
+      setConfig(c);
+      const ri = c.refreshIntervalSeconds || 60;
+      setRefresh(ri);
+      setCustomDsRefresh(!PRESET_REFRESH.includes(ri));
+      setCustomMimoRefresh(!PRESET_REFRESH.includes(c.mimoRefreshIntervalSeconds || 0) && (c.mimoRefreshIntervalSeconds || 0) > 0);
+      setCustomCooldown(!PRESET_COOLDOWN.includes(c.notifyCooldownMinutes || 30));
+      setAutoRefresh(c.autoRefreshEnabled);
+      setAutostart(c.autostart);
+      setAlwaysOnTop(c.alwaysOnTop || false);
+      setLowBalanceNotify(c.lowBalanceNotify || false);
+      setLowBalanceThreshold(String(c.lowBalanceThreshold || 5.00));
+      setStatus(c.apiKeyConfigured ? `${t("settings.configured_prefix")} ${c.apiKeyPreview}` : t("settings.api_key_unconfigured"));
+      setUsageStatus(c.usageTokenConfigured ? t("settings.token_configured") : t("settings.token_unconfigured"));
+      setTheme(c.theme || "light");
+      setCurrency(c.currency || "cny");
+      setEfficiencyUnit(c.efficiencyUnit || "token_per_currency");
+      setAutoClearOldCache(c.autoClearOldCache ?? true);
+    }).catch(() => setStatus(t("settings.browser_preview")));
   }, []);
   React.useEffect(() => { void getVersion().then(setAppVersion).catch(() => setAppVersion("1.1.0")); }, []);
 
@@ -81,22 +105,22 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   }, []);
 
   const refreshUsageAfterToken = React.useCallback((prefix: string) => {
-    setUsageStatus(`${prefix}，正在刷新用量数据…`);
-    return fetchCurrentUsage().then((u) => { onUsageLoaded(u); setUsageStatus(`${prefix}，本月消费 ${fmtMoney(u.monthCost)}`); return u; }).catch((e) => { setUsageStatus(`${prefix}，但用量刷新失败：${typeof e === "string" ? e : "刷新失败"}`); throw e; });
+    setUsageStatus(`${prefix}${t("usage.refreshing")}`);
+    return fetchCurrentUsage().then((u) => { onUsageLoaded(u); setUsageStatus(`${prefix}${tpl("usage.month_cost", { cost: fmtMoney(u.monthCost) })}`); return u; }).catch((e) => { setUsageStatus(`${prefix}${tpl("usage.refresh_fail", { err: typeof e === "string" ? e : t("usage.refresh_err") })}`); throw e; });
   }, [onUsageLoaded, fetchCurrentUsage]);
 
-  React.useEffect(() => { const p = listen<AppConfig>("usage-token-captured", (e) => { setConfig(e.payload); setUsageSyncing(false); void refreshUsageAfterToken("已通过网页登录自动同步用量 Token"); }); return () => { void p.then((u) => u()); }; }, [refreshUsageAfterToken]);
-  React.useEffect(() => { const p = listen("usage-sync-ended", () => { setUsageSyncing(false); setUsageStatus("登录窗口已关闭，Token 未获取到。可重新点击同步或使用方式二手动粘贴。"); }); return () => { void p.then((u) => u()); }; }, []);
-  React.useEffect(() => { const p = listen("mimo-sync-started", () => { setMimoStatus("请在打开的窗口中登录小米账号，登录后保持窗口打开"); }); return () => { void p.then((u) => u()); }; }, []);
+  React.useEffect(() => { const p = listen<AppConfig>("usage-token-captured", (e) => { setConfig(e.payload); setUsageSyncing(false); void refreshUsageAfterToken(t("usage.synced")); }); return () => { void p.then((u) => u()); }; }, [refreshUsageAfterToken]);
+  React.useEffect(() => { const p = listen("usage-sync-ended", () => { setUsageSyncing(false); setUsageStatus(t("usage.sync_ended")); }); return () => { void p.then((u) => u()); }; }, []);
+  React.useEffect(() => { const p = listen("mimo-sync-started", () => { setMimoStatus(t("mimo.login_hint")); }); return () => { void p.then((u) => u()); }; }, []);
 
-  const pasteApiKey = React.useCallback(async () => { try { setApiKey((await navigator.clipboard.readText()).trim()); setStatus("已从剪贴板读取"); } catch { setStatus("剪贴板读取失败"); } }, []);
-  const saveApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_api_key", { apiKey }).then((c) => { setConfig(c); setApiKey(""); setStatus("已保存，正在验证 Key…"); return invoke<BalanceData>("fetch_balance"); }).then((b) => { setStatus(`验证通过，当前余额 ${b.currency === "USD" ? "$" : "¥"}${b.totalBalance}${b.isAvailable ? "" : "（余额不足）"}`); }).catch((e) => { setStatus(typeof e === "string" ? e : "保存或验证失败"); }).finally(() => setBusy(false)); }, [apiKey]);
-  const clearApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_api_key").then((c) => { setConfig(c); setApiKey(""); setStatus("已清除 API Key"); }).catch((e) => { setStatus(typeof e === "string" ? e : "清除失败"); }).finally(() => setBusy(false)); }, []);
-  const pasteUsageToken = React.useCallback(async () => { try { setUsageToken((await navigator.clipboard.readText()).trim()); setUsageStatus("已从剪贴板读取"); } catch { setUsageStatus("剪贴板读取失败"); } }, []);
-  const startUsageSync = React.useCallback(() => { setUsageSyncing(true); setUsageStatus("正在打开登录窗口…"); void invoke<boolean>("start_usage_sync").then((s) => { if (!s) setUsageStatus("登录完成后，再次点击本按钮即可同步用量（可多点几次）"); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : "打开登录窗口失败"); }).finally(() => { window.setTimeout(() => setUsageSyncing(false), 2500); }); }, []);
-  const saveUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_usage_token", { usageToken }).then((c) => { setConfig(c); setUsageToken(""); setUsageStatus("已保存，正在验证用量 Token…"); return refreshUsageAfterToken("手动 Token 已保存"); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : "保存或验证失败"); }).finally(() => setBusy(false)); }, [refreshUsageAfterToken, usageToken]);
-  const clearUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_usage_token").then((c) => { setConfig(c); setUsageToken(""); setUsageStatus("已清除用量 Token"); onUsageCleared(); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : "清除失败"); }).finally(() => setBusy(false)); }, [onUsageCleared]);
-  const startMimoSync = React.useCallback(() => { setMimoSyncing(true); setMimoStatus("正在打开 MiMo 页面…"); void invoke<boolean>("start_mimo_sync").then((a) => { setMimoStatus(a ? "登录窗口已打开，请确认已登录小米账号" : "请在打开的窗口中登录小米账号，登录后保持窗口打开"); setMimoSyncing(false); }).catch((e) => { setMimoStatus(typeof e === "string" ? e : "启动同步失败"); setMimoSyncing(false); }); }, []);
+  const pasteApiKey = React.useCallback(async () => { try { setApiKey((await navigator.clipboard.readText()).trim()); setStatus(t("settings.clipboard_read")); } catch { setStatus(t("settings.clipboard_fail")); } }, []);
+  const saveApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_api_key", { apiKey }).then((c) => { setConfig(c); setApiKey(""); setAccountsState(c); setStatus(t("settings.saving_key")); return invoke<BalanceData>("fetch_balance"); }).then((b) => { setStatus(`${t("settings.verify_ok")} ${b.currency === "USD" ? "$" : "¥"}${b.totalBalance}${b.isAvailable ? "" : t("settings.balance_low_suffix")}`); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.save_verify_fail")); }).finally(() => setBusy(false)); }, [apiKey]);
+  const clearApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_api_key").then((c) => { setConfig(c); setApiKey(""); setAccountsState(c); setStatus(t("settings.cleared_key")); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, []);
+  const pasteUsageToken = React.useCallback(async () => { try { setUsageToken((await navigator.clipboard.readText()).trim()); setUsageStatus(t("settings.clipboard_read")); } catch { setUsageStatus(t("settings.clipboard_fail")); } }, []);
+  const startUsageSync = React.useCallback(() => { setUsageSyncing(true); setUsageStatus(t("usage.opening_login")); void invoke<boolean>("start_usage_sync").then((s) => { if (!s) setUsageStatus(t("usage.reopen_hint")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.open_fail")); }).finally(() => { window.setTimeout(() => setUsageSyncing(false), 2500); }); }, []);
+  const saveUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_usage_token", { usageToken }).then((c) => { setConfig(c); setUsageToken(""); setAccountsState(c); setUsageStatus(t("usage.saving_token")); return refreshUsageAfterToken(t("usage.manual_saved")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.save_fail")); }).finally(() => setBusy(false)); }, [refreshUsageAfterToken, usageToken]);
+  const clearUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_usage_token").then((c) => { setConfig(c); setUsageToken(""); setAccountsState(c); setUsageStatus(t("usage.cleared_token")); onUsageCleared(); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, [onUsageCleared]);
+  const startMimoSync = React.useCallback(() => { setMimoSyncing(true); setMimoStatus(t("mimo.opening_page")); void invoke<boolean>("start_mimo_sync").then((a) => { setMimoStatus(a ? t("mimo.opened_confirm") : t("mimo.login_hint")); setMimoSyncing(false); }).catch((e) => { setMimoStatus(typeof e === "string" ? e : t("mimo.sync_fail")); setMimoSyncing(false); }); }, []);
   const saveRefreshInterval = React.useCallback((s: number) => { const p = refresh; setRefresh(s); onRefreshIntervalChanged(s); void invoke<AppConfig>("save_refresh_interval", { refreshIntervalSeconds: s }).then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); onRefreshIntervalChanged(c.refreshIntervalSeconds || 60); }).catch(() => { setRefresh(p); onRefreshIntervalChanged(p); }); }, [onRefreshIntervalChanged, refresh]);
   const saveAutoRefreshEnabled = React.useCallback((e: boolean) => { const p = autoRefresh; setAutoRefresh(e); onAutoRefreshChanged(e); void invoke<AppConfig>("save_auto_refresh_enabled", { autoRefreshEnabled: e }).then((c) => { setConfig(c); setAutoRefresh(c.autoRefreshEnabled); onAutoRefreshChanged(c.autoRefreshEnabled); }).catch(() => { setAutoRefresh(p); onAutoRefreshChanged(p); }); }, [autoRefresh, onAutoRefreshChanged]);
   const saveAutostart = React.useCallback((e: boolean) => { const p = autostart; setAutostart(e); void invoke<AppConfig>("save_autostart", { autostart: e }).then((c) => { setConfig(c); setAutostart(c.autostart); }).catch(() => setAutostart(p)); }, [autostart]);
@@ -134,6 +158,23 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     onEfficiencyUnitChanged(val);
     void invoke<AppConfig>("save_efficiency_unit", { unit: val }).then((c) => { setConfig(c); }).catch(() => { setEfficiencyUnit(prev); onEfficiencyUnitChanged(prev); });
   }, [efficiencyUnit, onEfficiencyUnitChanged]);
+
+  /** 同步账户列表状态（AppConfig 返回后调用） */
+  const setAccountsState = (c: AppConfig) => {
+    onAccountsChanged(c.accounts || [], c.activeAccountId || null);
+  };
+
+  const addAccount = React.useCallback(() => {
+    const name = newAccountName.trim();
+    if (!name) return;
+    void invoke<AppConfig>("add_account", { name }).then((c) => { setConfig(c); setNewAccountName(""); setAccountsState(c); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.add_fail")); });
+  }, [newAccountName]);
+  const switchAccount = React.useCallback((id: string) => {
+    void invoke<AppConfig>("switch_account", { id }).then((c) => { setConfig(c); setAccountsState(c); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.switch_account")); });
+  }, []);
+  const deleteAccount = React.useCallback((id: string) => {
+    void invoke<AppConfig>("delete_account", { id }).then((c) => { setConfig(c); setAccountsState(c); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.delete_fail")); });
+  }, []);
 
   // Apply theme on mount and when theme changes
   React.useEffect(() => {
@@ -209,6 +250,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         { owner: "HaoyueQin", label: "" },
         { owner: "Joyi-code", label: " (原作者)" },
       ];
+      const locale = getLang() === "zh" ? "zh-CN" : "en-US";
       const releases: Array<{repo:string;tag:string;date:string;html:string}> = [];
       for (const repo of repos) {
         try {
@@ -224,7 +266,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             page++;
           }
           for (const r of allReleases) {
-            const date = new Date(r.published_at).toLocaleDateString("zh-CN");
+            const date = new Date(r.published_at).toLocaleDateString(locale);
             const html = await marked.parse(r.body || "");
             releases.push({ repo: `${repo.owner}${repo.label}`, tag: r.tag_name, date, html });
           }
@@ -234,7 +276,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       }
       setChangelogReleases(releases);
     } catch (e) {
-      setChangelogError(`获取更新日志失败: ${e instanceof Error ? e.message : String(e)}`);
+      setChangelogError(`${t("settings.changelog_fail")}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setChangelogLoading(false);
     }
@@ -248,9 +290,9 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const langDropdownRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const handler = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if ((langRef.current && langRef.current.contains(t)) ||
-          (langDropdownRef.current && langDropdownRef.current.contains(t))) return;
+      const target = e.target as Node;
+      if ((langRef.current && langRef.current.contains(target)) ||
+          (langDropdownRef.current && langDropdownRef.current.contains(target))) return;
       setLangOpen(false);
     };
     document.addEventListener('mousedown', handler);
@@ -272,32 +314,59 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   // Account category content - always show both platforms
   const accountContent = (
     <>
+      {/* 多账户管理（DeepSeek） */}
+      <SettingsSection icon={<User size={15} />} title={t('settings.accounts_title')}>
+        <p>{t('settings.accounts_desc')}</p>
+        {accounts.map((acc) => (
+          <div key={acc.id} className="account-row">
+            <div className="account-row-main">
+              <strong>{acc.name}</strong>
+              <span className="muted">
+                {t('settings.api_key')}: {acc.apiKeyConfigured ? t('settings.verified') : t('settings.not_configured')} · {t('usage.title')}: {acc.usageTokenConfigured ? t('settings.verified') : t('settings.not_configured')}
+              </span>
+            </div>
+            {activeAccountId === acc.id ? (
+              <span className="configured"><CheckCircle2 size={15} />{t('settings.active')}</span>
+            ) : (
+              <button className="secondary" onClick={() => switchAccount(acc.id)}>{t('settings.switch_account')}</button>
+            )}
+            {accounts.length > 1 && (
+              <button className="danger-link" onClick={() => deleteAccount(acc.id)} title={t('settings.delete_account')}>{t('settings.delete_account')}</button>
+            )}
+          </div>
+        ))}
+        <div className="key-row">
+          <input aria-label={t('settings.account_name')} type="text" maxLength={40} value={newAccountName} placeholder={t('settings.account_name_ph')} onChange={(e) => setNewAccountName(e.target.value)} />
+          <button className="primary" onClick={addAccount} disabled={!newAccountName.trim()}>{t('settings.add_account')}</button>
+        </div>
+      </SettingsSection>
+
       {/* DeepSeek Account */}
       <div style={{ marginBottom: 16, borderLeft: '3px solid #4f8cff', paddingLeft: 12 }}>
         <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#4f8cff' }}>DeepSeek</div>
-        <SettingsSection icon={<KeyRound size={15} />} title="API Key">
-          <p>用于调用 DeepSeek API 获取余额和用量数据。</p>
-          <p className="muted">API Key 只在当前这台 Windows 电脑本地保留。</p>
-          <div className="key-row"><input aria-label="API Key" type="password" maxLength={256} value={apiKey} placeholder={config?.apiKeyConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : "sk-..."} onChange={(e) => setApiKey(e.target.value)} /></div>
+        <SettingsSection icon={<KeyRound size={15} />} title={t('settings.api_key')}>
+          <p>{t('settings.api_key_desc')}</p>
+          <p className="muted">{t('settings.api_key_local')}</p>
+          <div className="key-row"><input aria-label={t('settings.api_key')} type="password" maxLength={256} value={apiKey} placeholder={config?.apiKeyConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : "sk-..."} onChange={(e) => setApiKey(e.target.value)} /></div>
           <div className="settings-actions">
-            <button className="primary" onClick={saveApiKey} disabled={busy || !apiKey.trim()}>验证并保存</button>
-            <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.apiKeyConfigured ? "已配置" : "未配置"}</span>
-            <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>清除 Key</button>
+            <button className="primary" onClick={saveApiKey} disabled={busy || !apiKey.trim()}>{t('settings.save')}</button>
+            <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.apiKeyConfigured ? t('settings.verified') : t('settings.not_configured')}</span>
+            <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>{t('settings.clear')}</button>
           </div>
         </SettingsSection>
-        <SettingsSection icon={<BarChart3 size={15} />} title="用量同步 Token">
-          <p>用于同步 Token 用量、消费和趋势图。DeepSeek 无官方用量 API，需网页登录 token（与 API Key 不同）。</p>
+        <SettingsSection icon={<BarChart3 size={15} />} title={t('usage.title')}>
+          <p>{t('usage.desc')}</p>
           <div className="settings-actions usage-sync-actions">
-            <button className="primary" onClick={startUsageSync} disabled={usageSyncing}>{usageSyncing ? "等待登录" : "网页登录自动同步"}</button>
-            <span className={config?.usageTokenConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.usageTokenConfigured ? "已配置" : "未配置"}</span>
-            <button className="secondary" onClick={clearUsageToken} disabled={busy || !config?.usageTokenConfigured}>清除 Token</button>
+            <button className="primary" onClick={startUsageSync} disabled={usageSyncing}>{usageSyncing ? t('usage.waiting') : t('usage.auto_sync')}</button>
+            <span className={config?.usageTokenConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.usageTokenConfigured ? t('settings.verified') : t('settings.not_configured')}</span>
+            <button className="secondary" onClick={clearUsageToken} disabled={busy || !config?.usageTokenConfigured}>{t('usage.clear_token')}</button>
           </div>
           <p className="muted">{usageStatus}</p>
-          <button className="link-button" onClick={() => setShowManualPaste((v) => !v)}>{showManualPaste ? "收起手动粘贴" : "方式二：手动粘贴 token"}</button>
+          <button className="link-button" onClick={() => setShowManualPaste((v) => !v)}>{showManualPaste ? t('usage.manual_collapse') : t('usage.manual')}</button>
           {showManualPaste && (<>
-            <p className="muted">获取：浏览器登录 platform.deepseek.com，按 F12 打开控制台，输入 JSON.parse(localStorage.userToken).value 回车，复制返回的字符串。</p>
-            <div className="key-row"><input aria-label="用量 Token" type="password" maxLength={4096} value={usageToken} placeholder={config?.usageTokenConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : ""} onChange={(e) => setUsageToken(e.target.value)} /></div>
-            <div className="settings-actions"><button className="primary" onClick={saveUsageToken} disabled={busy || !usageToken.trim()}>保存 Token</button></div>
+            <p className="muted">{t('usage.get_token_hint')}</p>
+            <div className="key-row"><input aria-label={t('usage.title')} type="password" maxLength={4096} value={usageToken} placeholder={config?.usageTokenConfigured ? "••••••••••••••••••••••••••••••••••••••••••••••••••" : ""} onChange={(e) => setUsageToken(e.target.value)} /></div>
+            <div className="settings-actions"><button className="primary" onClick={saveUsageToken} disabled={busy || !usageToken.trim()}>{t('usage.save_token')}</button></div>
           </>)}
         </SettingsSection>
       </div>
@@ -305,9 +374,9 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       {/* MiMo Account */}
       <div style={{ marginBottom: 16, borderLeft: '3px solid #FF6900', paddingLeft: 12 }}>
         <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#FF6900' }}>MiMo</div>
-        <SettingsSection icon={<BarChart3 size={15} />} title="MiMo 登录">
-          <p>通过小米账号登录 MiMo 平台，登录成功后即可查看余额和用量数据。</p>
-          <div className="settings-actions"><button className="primary" onClick={startMimoSync} disabled={mimoSyncing}>{mimoSyncing ? "正在打开…" : "打开 MiMo 登录"}</button></div>
+        <SettingsSection icon={<BarChart3 size={15} />} title={t('mimo.login')}>
+          <p>{t('mimo.login_desc')}</p>
+          <div className="settings-actions"><button className="primary" onClick={startMimoSync} disabled={mimoSyncing}>{mimoSyncing ? t('mimo.opening') : t('mimo.login_btn')}</button></div>
           {mimoStatus && <p className="muted">{mimoStatus}</p>}
         </SettingsSection>
       </div>
@@ -325,7 +394,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         {autoRefresh && (
           <div style={{ marginTop: 8 }}>
             <div style={{ marginBottom: 12 }}>
-              <span style={{ fontSize: '0.85em', fontWeight: 500 }}>DeepSeek 刷新间隔</span>
+              <span style={{ fontSize: '0.85em', fontWeight: 500 }}>{t('settings.ds_refresh_interval')}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                 <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
                   value={customDsRefresh ? -1 : refresh}
@@ -335,24 +404,24 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
                     setCustomDsRefresh(false);
                     saveRefreshInterval(v);
                   }}>
-                  <option value={60}>1 分钟</option>
-                  <option value={300}>5 分钟</option>
-                  <option value={1800}>30 分钟</option>
-                  <option value={3600}>1 小时</option>
-                  <option value={-1}>自定义</option>
+                  <option value={60}>{t('settings.refresh_1m')}</option>
+                  <option value={300}>{t('settings.refresh_5m')}</option>
+                  <option value={1800}>{t('settings.refresh_30m')}</option>
+                  <option value={3600}>{t('settings.refresh_1h')}</option>
+                  <option value={-1}>{t('settings.custom')}</option>
                 </select>
                 {customDsRefresh && (
                   <>
                     <input type="number" min="1" max="1440" style={{ width: 80, fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
-                      placeholder="数值"
+                      placeholder={t('settings.custom')}
                       onKeyDown={(e) => { if (e.key === 'Enter') { const val = parseInt((e.target as HTMLInputElement).value); if (val > 0) saveRefreshInterval(val * 60); } }} />
-                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>分钟</span>
+                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{t('settings.minutes')}</span>
                   </>
                 )}
               </div>
             </div>
             <div>
-              <span style={{ fontSize: '0.85em', fontWeight: 500 }}>MiMo 刷新间隔</span>
+              <span style={{ fontSize: '0.85em', fontWeight: 500 }}>{t('settings.mimo_refresh_interval')}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                 <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
                   value={customMimoRefresh ? -1 : (config?.mimoRefreshIntervalSeconds || 60)}
@@ -362,18 +431,18 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
                     setCustomMimoRefresh(false);
                     void invoke<AppConfig>("save_mimo_refresh_interval", { seconds: v }).then(setConfig).catch(() => {});
                   }}>
-                  <option value={60}>1 分钟</option>
-                  <option value={300}>5 分钟</option>
-                  <option value={1800}>30 分钟</option>
-                  <option value={3600}>1 小时</option>
-                  <option value={-1}>自定义</option>
+                  <option value={60}>{t('settings.refresh_1m')}</option>
+                  <option value={300}>{t('settings.refresh_5m')}</option>
+                  <option value={1800}>{t('settings.refresh_30m')}</option>
+                  <option value={3600}>{t('settings.refresh_1h')}</option>
+                  <option value={-1}>{t('settings.custom')}</option>
                 </select>
                 {customMimoRefresh && (
                   <>
                     <input type="number" min="1" max="1440" style={{ width: 80, fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
-                      placeholder="数值"
+                      placeholder={t('settings.custom')}
                       onKeyDown={(e) => { if (e.key === 'Enter') { const val = parseInt((e.target as HTMLInputElement).value); if (val > 0) void invoke<AppConfig>("save_mimo_refresh_interval", { seconds: val * 60 }).then(setConfig).catch(() => {}); } }} />
-                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>分钟</span>
+                    <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{t('settings.minutes')}</span>
                   </>
                 )}
               </div>
@@ -434,7 +503,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const displayContent = (
     <>
       <SettingsSection icon={<Palette size={15} />} title={t('settings.currency')}>
-        <p>选择金额显示的货币。</p>
+        <p>{t('settings.choose_currency')}</p>
         <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
           {(["cny", "usd"] as const).map((opt) => (
             <button key={opt} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: currency === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: currency === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => saveCurrency(opt)}>
@@ -442,17 +511,17 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             </button>
           ))}
         </div>
-        <p style={{ marginTop: 12 }}>效率指标显示方式：</p>
+        <p style={{ marginTop: 12 }}>{t('settings.efficiency_way')}</p>
         <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
           {(["token_per_currency", "currency_per_token"] as const).map((opt) => (
             <button key={opt} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: efficiencyUnit === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: efficiencyUnit === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => saveEfficiencyUnit(opt)}>
-              {opt === "token_per_currency" ? (currency === "usd" ? "MT/$" : "MT/¥") : (currency === "usd" ? "$/MT" : "¥/MT")}
+              {opt === "token_per_currency" ? t('settings.token_per_currency') : t('settings.currency_per_token')}
             </button>
           ))}
         </div>
       </SettingsSection>
       <SettingsSection icon={<Palette size={15} />} title={t('settings.theme')}>
-        <p>选择应用的外观主题。</p>
+        <p>{t('settings.choose_theme')}</p>
         <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
           {(["light", "dark", "system"] as const).map((opt) => (
             <button key={opt} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: theme === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: theme === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => saveTheme(opt)}>
@@ -495,19 +564,19 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
                 setCustomCooldown(false);
                 void invoke<AppConfig>("save_notify_cooldown", { minutes: v }).then(setConfig).catch(() => {});
               }}>
-              <option value={10}>10 分钟</option>
-              <option value={30}>30 分钟</option>
-              <option value={60}>1 小时</option>
-              <option value={180}>3 小时</option>
-              <option value={360}>6 小时</option>
-              <option value={-1}>自定义</option>
+              <option value={10}>{t('settings.cooldown_10m')}</option>
+              <option value={30}>{t('settings.cooldown_30m')}</option>
+              <option value={60}>{t('settings.cooldown_1h')}</option>
+              <option value={180}>{t('settings.cooldown_3h')}</option>
+              <option value={360}>{t('settings.cooldown_6h')}</option>
+              <option value={-1}>{t('settings.custom')}</option>
             </select>
             {customCooldown && (
               <>
                 <input type="number" min="1" style={{ width: 80, fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }}
-                  placeholder="数值"
+                  placeholder={t('settings.custom')}
                   onKeyDown={(e) => { if (e.key === 'Enter') { const val = parseInt((e.target as HTMLInputElement).value); if (val > 0) void invoke<AppConfig>("save_notify_cooldown", { minutes: val }).then(setConfig).catch(() => {}); } }} />
-                <span style={{ fontSize: '0.8em', opacity: 0.6 }}>分钟</span>
+                <span style={{ fontSize: '0.8em', opacity: 0.6 }}>{t('settings.minutes')}</span>
               </>
             )}
           </div>
@@ -552,7 +621,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         {updateError && <span className="configured" style={{ color: 'var(--orange)' }}>⚠ {updateError}</span>}
       </div>
       <button className="secondary" onClick={() => { void handleViewChangelog(); }} disabled={changelogLoading} style={{ marginTop: 8 }}>
-        {changelogLoading ? "加载中…" : changelogReleases.length > 0 ? "收起更新日志" : "查看更新日志"}
+        {changelogLoading ? t("settings.loading") : changelogReleases.length > 0 ? t("settings.hide_changelog") : t("settings.view_changelog")}
       </button>
       {changelogError && <p className="muted" style={{ color: 'var(--orange)', marginTop: 4 }}>{changelogError}</p>}
       {changelogReleases.length > 0 && (
@@ -602,7 +671,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         </div>
       )}
       <div style={{ marginTop: 12, fontSize: '0.75em', color: 'var(--text-faint)', wordBreak: 'break-all' }}>
-        <span>配置文件：</span><span>{configPath}</span>
+        <span>{t('settings.config_path')}</span><span>{configPath}</span>
       </div>
     </SettingsSection>
   );
@@ -610,6 +679,29 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   // Data management category content
   const [exportFormat, setExportFormat] = React.useState<"json" | "csv">("json");
   const [exportPlatform, setExportPlatform] = React.useState<"all" | "deepseek" | "mimo">("all");
+  const [exportFrom, setExportFrom] = React.useState<string>("");
+  const [exportTo, setExportTo] = React.useState<string>("");
+
+  // 生成最近 36 个月的选项（YYYY-MM）
+  const monthOptions = React.useMemo(() => {
+    const out: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < 36; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    return out;
+  }, []);
+
+  const inExportRange = (key: string): boolean => {
+    if (!exportFrom && !exportTo) return true;
+    const m = key.match(/dsm-usage-(?:deepseek|mimo)-(\d{4}-\d{2})/);
+    if (!m) return true; // 非用量缓存（余额等）总是导出
+    const ym = m[1];
+    if (exportFrom && ym < exportFrom) return false;
+    if (exportTo && ym > exportTo) return false;
+    return true;
+  };
 
   const handleExport = () => {
     const keys: string[] = [];
@@ -618,6 +710,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       if (!key || !key.startsWith('dsm-')) continue;
       if (exportPlatform === "deepseek" && key.includes('mimo')) continue;
       if (exportPlatform === "mimo" && !key.includes('mimo') && !key.includes('platform')) continue;
+      if (!inExportRange(key)) continue;
       keys.push(key);
     }
 
@@ -629,21 +722,29 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `dsm-data-${exportPlatform}.json`; a.click(); URL.revokeObjectURL(url);
     } else {
-      // CSV: flatten each key-value pair
-      const rows = [["key", "value"]];
+      // CSV：使用数据展开为按日期的行，其余键值平铺
+      const rows: string[][] = [["key", "date", "totalTokens", "totalCost", "hitTokens", "missTokens", "responseTokens"]];
       for (const key of keys) {
         const val = localStorage.getItem(key) || '';
+        const usageMatch = key.match(/^dsm-usage-(deepseek|mimo)-\d{4}-\d{2}$/);
         try {
           const parsed = JSON.parse(val);
-          if (typeof parsed === 'object' && parsed !== null) {
-            // Flatten nested objects
+          if (usageMatch && typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { days?: unknown[] }).days)) {
+            const usage = parsed as { days: Array<{ date: string; totalTokens?: number; totalCost?: number; flashCacheHit?: number; flashCacheMiss?: number; flashResponse?: number; proCacheHit?: number; proCacheMiss?: number; proResponse?: number; models?: Array<{ cacheHitTokens?: number; cacheMissTokens?: number; responseTokens?: number }> }> };
+            for (const day of usage.days) {
+              const hit = (day.flashCacheHit ?? 0) + (day.proCacheHit ?? 0) + (day.models?.reduce((s, m) => s + (m.cacheHitTokens ?? 0), 0) ?? 0);
+              const miss = (day.flashCacheMiss ?? 0) + (day.proCacheMiss ?? 0) + (day.models?.reduce((s, m) => s + (m.cacheMissTokens ?? 0), 0) ?? 0);
+              const response = (day.flashResponse ?? 0) + (day.proResponse ?? 0) + (day.models?.reduce((s, m) => s + (m.responseTokens ?? 0), 0) ?? 0);
+              rows.push([key, day.date, String(day.totalTokens ?? 0), String(day.totalCost ?? 0), String(hit), String(miss), String(response)]);
+            }
+          } else if (typeof parsed === 'object' && parsed !== null) {
             for (const [k, v] of Object.entries(parsed)) {
-              rows.push([`${key}.${k}`, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
+              rows.push([`${key}.${k}`, '', typeof v === 'object' ? JSON.stringify(v) : String(v)]);
             }
           } else {
-            rows.push([key, String(parsed)]);
+            rows.push([key, '', String(parsed)]);
           }
-        } catch { rows.push([key, val]); }
+        } catch { rows.push([key, '', val]); }
       }
       const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
       const blob = new Blob(['\uFEFF' + csv], { type: "text/csv;charset=utf-8" });
@@ -657,21 +758,35 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         <Toggle label={t('settings.auto_clear_cache')} checked={autoClearOldCache} onChange={(e) => { setAutoClearOldCache(e); void invoke<AppConfig>("save_auto_clear_old_cache", { enabled: e }).then(setConfig).catch(() => {}); }} />
         <p>{t('settings.auto_clear_cache_desc')}</p>
         <div className="settings-actions">
-          <button className="primary" disabled={reloading} onClick={async () => { setReloading(true); setCacheMsg(""); try { await (onReloadCache ? onReloadCache() : Promise.resolve()); setCacheMsg("✓ 缓存已重新加载"); } catch { setCacheMsg("✗ 加载失败，请重试"); } finally { setReloading(false); } }}>{reloading ? "加载中…" : t('settings.reload_cache')}</button>
+          <button className="primary" disabled={reloading} onClick={async () => { setReloading(true); setCacheMsg(""); try { await (onReloadCache ? onReloadCache() : Promise.resolve()); setCacheMsg(t("settings.reload_ok")); } catch { setCacheMsg(t("settings.reload_fail")); } finally { setReloading(false); } }}>{reloading ? t("settings.loading") : t('settings.reload_cache')}</button>
         </div>
         <p>{t('settings.reload_cache_desc')}</p>
         {cacheMsg && <p style={{ color: cacheMsg.startsWith("✓") ? 'var(--green)' : 'var(--orange)', marginTop: 4 }}>{cacheMsg}</p>}
       </SettingsSection>
+      <SettingsSection icon={<Settings size={15} />} title={t('settings.history_depth')}>
+        <p>{t('settings.history_depth_desc')}</p>
+        <select style={{ fontSize: '0.85em', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text-strong)' }}
+          value={historyMonths}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            onHistoryMonthsChanged(v);
+            void invoke<AppConfig>("save_history_months", { months: v }).then(setConfig).catch(() => {});
+          }}>
+          <option value={12}>{t('settings.history_12')}</option>
+          <option value={24}>{t('settings.history_24')}</option>
+          <option value={36}>{t('settings.history_36')}</option>
+        </select>
+      </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.clear_cache')}>
         <p>{t('settings.clear_cache_desc')}</p>
         <div className="settings-actions">
-          <button className="secondary" onClick={() => { localStorage.clear(); setCacheMsg("✓ 缓存已清除"); }}>{t('settings.clear_cache')}</button>
+          <button className="secondary" onClick={() => { localStorage.clear(); setCacheMsg(t("settings.reload_ok")); }}>{t('settings.clear_cache')}</button>
         </div>
       </SettingsSection>
-      <SettingsSection icon={<Settings size={15} />} title="导出使用数据">
-        <p>导出缓存的使用数据（余额、用量等），支持多种格式和平台过滤。</p>
+      <SettingsSection icon={<Settings size={15} />} title={t('settings.export_title')}>
+        <p>{t('settings.export_desc')}</p>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>格式：</span>
+          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>{t('settings.format')}</span>
           <div style={{ display: 'inline-flex', gap: 6 }}>
             {(["json", "csv"] as const).map((opt) => (
               <button key={opt} style={{ border: 0, borderRadius: 8, padding: '6px 12px', background: exportFormat === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: exportFormat === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.8em', fontWeight: 600, cursor: 'pointer', textTransform: 'uppercase' }} onClick={() => setExportFormat(opt)}>{opt}</button>
@@ -679,13 +794,26 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           </div>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>平台：</span>
+          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>{t('settings.platform')}</span>
           <div style={{ display: 'inline-flex', gap: 6 }}>
             {(["all", "deepseek", "mimo"] as const).map((opt) => (
-              <button key={opt} style={{ border: 0, borderRadius: 8, padding: '6px 12px', background: exportPlatform === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: exportPlatform === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.8em', fontWeight: 600, cursor: 'pointer' }} onClick={() => setExportPlatform(opt)}>{opt === "all" ? "全部" : opt === "deepseek" ? "DeepSeek" : "MiMo"}</button>
+              <button key={opt} style={{ border: 0, borderRadius: 8, padding: '6px 12px', background: exportPlatform === opt ? 'var(--brand)' : 'rgba(var(--fg), 0.12)', color: exportPlatform === opt ? '#fff' : 'var(--text-strong)', fontSize: '0.8em', fontWeight: 600, cursor: 'pointer' }} onClick={() => setExportPlatform(opt)}>{opt === "all" ? t('settings.all') : opt === "deepseek" ? "DeepSeek" : "MiMo"}</button>
             ))}
           </div>
         </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>{t('settings.export_range')}</span>
+          <select style={{ fontSize: '0.8em', padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }} value={exportFrom} onChange={(e) => setExportFrom(e.target.value)}>
+            <option value="">{t('settings.all')}</option>
+            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <span style={{ fontSize: '0.85em', opacity: 0.7 }}>{t('settings.to_month')}</span>
+          <select style={{ fontSize: '0.8em', padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(var(--fg), 0.15)', background: 'rgba(var(--fg), 0.03)', color: 'var(--text)' }} value={exportTo} onChange={(e) => setExportTo(e.target.value)}>
+            <option value="">{t('settings.all')}</option>
+            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <p className="muted">{t('settings.export_range_desc')}</p>
         <div className="settings-actions">
           <button className="secondary" onClick={async () => {
             const { save } = await import("@tauri-apps/plugin-dialog");
@@ -696,11 +824,11 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             });
             if (!filePath) return;
             handleExport();
-          }}>导出 {exportFormat.toUpperCase()}</button>
+          }}>{tpl('settings.export_btn', { fmt: exportFormat.toUpperCase() })}</button>
         </div>
       </SettingsSection>
-      <SettingsSection icon={<Settings size={15} />} title="导入使用数据">
-        <p>从 JSON 文件导入使用数据，将覆盖当前缓存。</p>
+      <SettingsSection icon={<Settings size={15} />} title={t('settings.import_title')}>
+        <p>{t('settings.import_desc')}</p>
         <div className="settings-actions">
           <button className="secondary" onClick={() => {
             const input = document.createElement("input"); input.type = "file"; input.accept = ".json";
@@ -708,11 +836,11 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
               try {
                 const data = JSON.parse(reader.result as string);
                 for (const [key, val] of Object.entries(data)) { if (key.startsWith('dsm-')) localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val)); }
-                alert("使用数据已导入，刷新页面生效");
-              } catch { alert("导入失败：文件格式错误"); }
+                alert(t("settings.import_ok"));
+              } catch { alert(t("settings.import_fail")); }
             }; reader.readAsText(file); };
             input.click();
-          }}>导入使用数据</button>
+          }}>{t('settings.import_btn')}</button>
         </div>
       </SettingsSection>
     </>
@@ -729,7 +857,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
 
   return (
     <section className="settings-panel" data-testid="settings-panel">
-      <button className="floating-close settings-close" onClick={onBack} aria-label="返回主面板"><X size={20} /></button>
+      <button className="floating-close settings-close" onClick={onBack} aria-label={t("detail.back")}><X size={20} /></button>
       <div className="settings-inner">
         <header className="settings-header" data-tauri-drag-region>
           <span className="settings-provider-title">DeepSeek / MiMo Monitor</span>

@@ -1,8 +1,9 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BarChart3, Brain, CalendarDays, CreditCard, Settings, Shirt, SunMedium, X, Zap, RefreshCw } from "lucide-react";
-import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel, AppConfig } from "../types";
+import { BarChart3, Brain, CalendarDays, CreditCard, Settings, Shirt, SunMedium, X, Zap, RefreshCw, LineChart } from "lucide-react";
+import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel, AppConfig, BalanceHistoryEntry } from "../types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon } from "../utils";
+import { t, tpl } from "../i18n";
 
 // ─── BalanceCard ───────────────────────────────────────────
 export function BalanceCard({ balance, state, error, todayCost, monthCost, provider, currency, exchangeRate }: {
@@ -23,32 +24,90 @@ export function BalanceCard({ balance, state, error, todayCost, monthCost, provi
     ? (dsBalance?.currency === "USD" ? "$" : "¥")
     : (mimoBalance?.currency === "USD" ? "$" : "¥");
   const amount =
-    state === "loading" ? "查询中…"
-    : state === "nokey" ? "未配置"
-    : state === "error" ? "查询失败"
+    state === "loading" ? t("app.loading")
+    : state === "nokey" ? t("app.unconfigured")
+    : state === "error" ? t("app.error")
     : isDeepSeek ? `${symbol}${dsBalance?.totalBalance ?? "0.00"}`
     : `${symbol}${mimoBalance?.availableBalance ?? "0.00"}`;
-  const statusText = state === "ok" ? (isDeepSeek && dsBalance?.isAvailable === false ? "余额不足" : "可用") : "—";
+  const statusText = state === "ok" ? (isDeepSeek && dsBalance?.isAvailable === false ? t("balance.insufficient") : t("balance.available")) : "—";
   const statusOff = state === "ok" && isDeepSeek && dsBalance != null && !dsBalance.isAvailable;
 
   return (
     <article className="card balance-card">
       <div className="card-title-row">
-        <div className="caption-with-icon"><CreditCard size={15} /><span>账户余额</span></div>
+        <div className="caption-with-icon"><CreditCard size={15} /><span>{t("balance.title")}</span></div>
         <div className={`status-pill ${statusOff ? "off" : ""}`}><span />{statusText}</div>
       </div>
       <div className={`balance-amount ${state !== "ok" ? "balance-dim" : ""}`}>{amount}</div>
       {state === "error" && <div className="balance-error">{error}</div>}
       <div className="metric-grid">
         <div className="mini-card">
-          <div className="caption-with-icon orange"><SunMedium size={15} /><span>当日消耗</span></div>
+          <div className="caption-with-icon orange"><SunMedium size={15} /><span>{t("balance.today")}</span></div>
           <strong>{todayCost != null ? fmtMoney(todayCost, currency, exchangeRate) : "—"}</strong>
         </div>
         <div className="mini-card">
-          <div className="caption-with-icon orange"><CalendarDays size={15} /><span>本月消费</span></div>
+          <div className="caption-with-icon orange"><CalendarDays size={15} /><span>{t("balance.monthly")}</span></div>
           <strong>{monthCost != null ? fmtMoney(monthCost, currency, exchangeRate) : "—"}</strong>
         </div>
       </div>
+    </article>
+  );
+}
+
+// ─── BalanceHistoryCard（余额走势）─────────────────────────
+const HISTORY_RANGES = [7, 30, 90] as const;
+
+export function BalanceHistoryCard({ history }: { history: BalanceHistoryEntry[] }) {
+  const [range, setRange] = React.useState<number>(30);
+  const W = 300, H = 72, PAD = 4;
+
+  // 按日期升序取最近 range 天
+  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
+  const cutoff = dateKey(addDays(new Date(), -(range - 1)));
+  const points = sorted.filter((e) => e.date >= cutoff).slice(-range);
+  const latest = points[points.length - 1];
+
+  let body: React.ReactNode;
+  if (points.length < 2) {
+    body = <div className="chart-placeholder">{t("balance.history_empty")}</div>;
+  } else {
+    const values = points.map((p) => p.balance);
+    const max = Math.max(...values, 0);
+    const min = Math.min(...values, 0);
+    const span = max - min || 1;
+    const xs = points.map((_, i) => PAD + (i / (points.length - 1)) * (W - PAD * 2));
+    const ys = values.map((v) => H - PAD - ((v - min) / span) * (H - PAD * 2));
+    const line = points.map((_, i) => `${xs[i].toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+    const area = `${PAD},${H - PAD} ${line} ${xs[xs.length - 1].toFixed(1)},${H - PAD}`;
+
+    body = (
+      <>
+        <svg className="balance-history-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+          <polygon points={area} className="bh-area" />
+          <polyline points={line} className="bh-line" fill="none" />
+          {points.map((p, i) => (
+            <circle key={p.date} cx={xs[i]} cy={ys[i]} r={2.2} className="bh-dot" />
+          ))}
+        </svg>
+        <div className="bh-footer">
+          <span>{points[0].date.slice(5)} → {latest.date.slice(5)}</span>
+          <strong>{fmtMoney(latest.balance)}</strong>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <article className="card balance-history-card">
+      <div className="card-title-row">
+        <div className="caption-with-icon"><LineChart size={15} className="brand-blue" /><span>{t("balance.history")}</span></div>
+        <div className="chart-mode-toggle">
+          {HISTORY_RANGES.map((r) => (
+            <button key={r} className={range === r ? "active" : ""} onClick={() => setRange(r)}>{t(`balance.history_${r}d`)}</button>
+          ))}
+        </div>
+      </div>
+      {body}
     </article>
   );
 }
@@ -67,10 +126,10 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
 }) {
   const isFlash = modelKey === "flash";
   const name = modelDisplay ?? (isFlash ? "V4 Flash" : "V4 Pro");
-  const tokensText = data ? `${fmtInt(data.totalTokens)} Tokens`
-    : state === "loading" ? "查询中…"
-    : state === "nokey" ? "未配置 Token"
-    : state === "error" ? "用量不可用" : "—";
+  const tokensText = data ? `${fmtInt(data.totalTokens)} ${t("app.tokens")}`
+    : state === "loading" ? t("app.loading")
+    : state === "nokey" ? t("app.unconfigured_token")
+    : state === "error" ? t("usage.unavailable") : "—";
   const cost = data ? fmtMoney(data.cost, currency, exchangeRate) : "—";
   const sym = currency === "usd" ? "$" : "¥";
   const displayCost = currency === "usd" && exchangeRate && exchangeRate > 0 ? data ? data.cost * exchangeRate : 0 : data ? data.cost : 0;
@@ -94,7 +153,7 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
         </div>
         {data && data.cacheHitTokens + data.cacheMissTokens > 0 && (
           <span className={`cache-hit-rate ${isFlash ? "flash" : "pro"}`}>
-            缓存命中 {((data.cacheHitTokens / (data.cacheHitTokens + data.cacheMissTokens)) * 100).toFixed(3)}%
+            {t("usage.cache_hit")} {((data.cacheHitTokens / (data.cacheHitTokens + data.cacheMissTokens)) * 100).toFixed(3)}%
           </span>
         )}
       </div>
@@ -118,6 +177,7 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
 }) {
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
   const [weekOffset, setWeekOffset] = React.useState(0);
+  const [chartMode, setChartMode] = React.useState<"bar" | "line">("bar");
   const MIN_BAR = 3;
   const DAYS_PER_WEEK = 7;
 
@@ -166,62 +226,96 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
   const canGoForward = weekOffset < 0;
   const MAX_WEEKS_BACK = 52; // 限制一年
   const canGoBack = weekOffset > -(MAX_WEEKS_BACK + 1);
-  const weekLabel = weekOffset === 0 ? "本周" : weekOffset === -1 ? "上周" : `${-weekOffset}周前`;
-  const placeholder = state === "loading" ? "查询中…" : state === "nokey" ? "未配置用量 Token" : state === "error" ? error : "暂无数据";
+  const weekLabel = weekOffset === 0 ? t("chart.this_week") : weekOffset === -1 ? t("chart.last_week") : tpl("chart.weeks_ago", { n: -weekOffset });
+  const placeholder = state === "loading" ? t("app.loading") : state === "nokey" ? t("app.unconfigured_usage_token") : state === "error" ? error : t("app.no_data");
+
+  /** tooltip 内容（柱状图与折线图共用） */
+  const renderTooltip = (point: (typeof points)[number], idx: number) => (
+    <div className={`bar-tooltip${idx <= 1 ? " align-left" : idx >= points.length - 2 ? " align-right" : ""}`}>
+      <div className="bar-tooltip-head"><span className="bar-tooltip-date">{point.date}</span><strong>{fmtInt(point.total)} tokens</strong></div>
+      <span className="bar-tooltip-row"><i className="dot hit" />{t("chart.input_hit")}<strong>{fmtInt(point.hit)} tokens</strong></span>
+      <span className="bar-tooltip-row"><i className="dot miss" />{t("chart.input_miss")}<strong>{fmtInt(point.miss)} tokens</strong></span>
+      <span className="bar-tooltip-row"><i className="dot response" />{t("chart.output")}<strong>{fmtInt(point.response)} tokens</strong></span>
+      <span className="bar-tooltip-row" style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(var(--fg), 0.1)' }}>{t("usage.cache_hit")} <strong>{point.hit + point.miss > 0 ? ((point.hit / (point.hit + point.miss)) * 100).toFixed(3) : "0"}%</strong></span>
+      <span className="bar-tooltip-row">{t("chart.avg_price")} <strong>
+        {point.cost > 0 && point.total > 0
+          ? efficiencyUnit === "token_per_currency"
+            ? `${(point.total / point.cost / 1_000_000).toFixed(2)} MT/${sym}`
+            : `${(point.cost * 1_000_000 / point.total).toFixed(3)} ${sym}/MT`
+          : "—"}
+      </strong></span>
+    </div>
+  );
+
+  const chartBody = chartMode === "bar" ? (
+    <div className="bars" onMouseLeave={() => setHoveredIdx(null)}>
+      {points.map((point, idx) => (
+        <div className="bar-column" key={point.date} onMouseEnter={() => setHoveredIdx(idx)}>
+          {hoveredIdx === idx && renderTooltip(point, idx)}
+          <span className="bar-value">{point.total > 0 ? fmtTokensShort(point.total) : "0"}</span>
+          <div className="bar-slot">
+            <div className="cache-bar" style={{ height: `${point.total > 0 ? Math.max(MIN_BAR, (point.total / maxVal) * 100) : MIN_BAR}%` }}>
+              {point.total > 0 ? (
+                <>
+                  {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
+                  {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
+                  {point.response > 0 && <i className="seg response" style={{ flexGrow: point.response }} />}
+                </>
+              ) : <i className="seg empty" />}
+            </div>
+          </div>
+          <span className="bar-day">{mmdd(point.date)}</span>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div className="line-chart" onMouseLeave={() => setHoveredIdx(null)}>
+      <svg viewBox="0 0 700 140" preserveAspectRatio="none">
+        {(["hit", "miss", "response"] as const).map((key) => {
+          const values = points.map((p) => p[key]);
+          const pts = values.map((v, i) => `${(i / (points.length - 1)) * 700},${140 - (v / maxVal) * 130}`).join(" ");
+          return <polyline key={key} points={pts} className={`lc-line ${key}`} fill="none" />;
+        })}
+      </svg>
+      {points.map((point, idx) => (
+        <div
+          key={point.date}
+          className="line-point"
+          style={{ left: `${(idx / (points.length - 1)) * 100}%` }}
+          onMouseEnter={() => setHoveredIdx(idx)}
+        >
+          {hoveredIdx === idx && renderTooltip(point, idx)}
+          <span className="line-point-date">{mmdd(point.date)}</span>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <article className="card chart-card">
       <div className="card-title-row">
-        <div className="caption-with-icon"><BarChart3 size={16} className="brand-blue" /><span>缓存命中明细</span></div>
-        <div className="chart-nav">
-          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title="上一周">‹</button>
-          <span className="chart-nav-label">{weekLabel}</span>
-          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title="下一周">›</button>
+        <div className="caption-with-icon"><BarChart3 size={16} className="brand-blue" /><span>{t("chart.cache_hit")}</span></div>
+        <div className="chart-nav-wrap">
+          <div className="chart-mode-toggle">
+            <button className={chartMode === "bar" ? "active" : ""} onClick={() => setChartMode("bar")}>{t("chart.bar")}</button>
+            <button className={chartMode === "line" ? "active" : ""} onClick={() => setChartMode("line")}>{t("chart.line")}</button>
+          </div>
+          <div className="chart-nav">
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title={t("chart.prev_week")}>‹</button>
+            <span className="chart-nav-label">{weekLabel}</span>
+            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title={t("chart.next_week")}>›</button>
+          </div>
         </div>
       </div>
       {state === "ok" && points.length > 0 ? (
         <>
-          <div className="bars" onMouseLeave={() => setHoveredIdx(null)}>
-            {points.map((point, idx) => (
-              <div className="bar-column" key={point.date} onMouseEnter={() => setHoveredIdx(idx)}>
-                {hoveredIdx === idx && (
-                  <div className={`bar-tooltip${idx <= 1 ? " align-left" : idx >= points.length - 2 ? " align-right" : ""}`}>
-                    <div className="bar-tooltip-head"><span className="bar-tooltip-date">{point.date}</span><strong>{fmtInt(point.total)} tokens</strong></div>
-                    <span className="bar-tooltip-row"><i className="dot hit" />输入（命中缓存）<strong>{fmtInt(point.hit)} tokens</strong></span>
-                    <span className="bar-tooltip-row"><i className="dot miss" />输入（未命中缓存）<strong>{fmtInt(point.miss)} tokens</strong></span>
-                    <span className="bar-tooltip-row"><i className="dot response" />输出<strong>{fmtInt(point.response)} tokens</strong></span>
-                    <span className="bar-tooltip-row" style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid rgba(var(--fg), 0.1)' }}>缓存命中 <strong>{point.hit + point.miss > 0 ? ((point.hit / (point.hit + point.miss)) * 100).toFixed(3) : "0"}%</strong></span>
-                    <span className="bar-tooltip-row">平均单价 <strong>
-                      {point.cost > 0 && point.total > 0
-                        ? efficiencyUnit === "token_per_currency"
-                          ? `${(point.total / point.cost / 1_000_000).toFixed(2)} MT/${sym}`
-                          : `${(point.cost * 1_000_000 / point.total).toFixed(3)} ${sym}/MT`
-                        : "—"}
-                    </strong></span>
-                  </div>
-                )}
-                <span className="bar-value">{point.total > 0 ? fmtTokensShort(point.total) : "0"}</span>
-                <div className="bar-slot">
-                  <div className="cache-bar" style={{ height: `${point.total > 0 ? Math.max(MIN_BAR, (point.total / maxVal) * 100) : MIN_BAR}%` }}>
-                    {point.total > 0 ? (
-                      <>
-                        {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
-                        {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
-                        {point.response > 0 && <i className="seg response" style={{ flexGrow: point.response }} />}
-                      </>
-                    ) : <i className="seg empty" />}
-                  </div>
-                </div>
-                <span className="bar-day">{mmdd(point.date)}</span>
-              </div>
-            ))}
-          </div>
+          {chartBody}
           <div className="chart-footer">
             <span className="chart-total">{state === "ok" ? `${hitRate}% · ${fmtTokensShort(sumTotal)} · ${ratio}` : "—"}</span>
             <span className="chart-legend">
-              <span className="chart-legend-item"><i className="dot hit" />命中</span>
-              <span className="chart-legend-item"><i className="dot miss" />未命中</span>
-              <span className="chart-legend-item"><i className="dot response" />输出</span>
+              <span className="chart-legend-item"><i className="dot hit" />{t("chart.hit")}</span>
+              <span className="chart-legend-item"><i className="dot miss" />{t("chart.miss")}</span>
+              <span className="chart-legend-item"><i className="dot response" />{t("chart.output")}</span>
             </span>
           </div>
         </>
@@ -238,7 +332,7 @@ const MIMO_DEFAULT_MODELS: MimoUsageModel[] = [
 ];
 
 // ─── DashboardPanel ────────────────────────────────────────
-export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate, efficiencyUnit }: {
+export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate, efficiencyUnit, balanceHistory }: {
   provider: Provider;
   onProviderChange: (p: Provider) => void;
   balance: BalanceData | MimoBalanceData | null;
@@ -254,6 +348,7 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   currency: "cny" | "usd";
   exchangeRate: number;
   efficiencyUnit: "token_per_currency" | "currency_per_token";
+  balanceHistory: BalanceHistoryEntry[];
 }) {
   // Theme is managed by SettingsPanel via config; just ensure data-theme is set on mount
   React.useEffect(() => {
@@ -269,9 +364,10 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   const maxTokens = Math.max(flash?.totalTokens ?? 0, pro?.totalTokens ?? 0, ...(mimoUsage?.models.map((m) => m.totalTokens) ?? []), 1);
   const today = dsUsage?.days.find((day) => day.date === todayStr()) ?? null;
   const mimoToday = mimoUsage?.days.find((day) => day.date === todayStr()) ?? null;
-  const todayCost = usageState === "ok" ? (today ? today.totalCost : mimoToday ? mimoToday.totalCost : null) : null;
+  const todayCost = usageState === "ok" ? (isDeepSeek ? (today ? today.totalCost : null) : (mimoToday ? mimoToday.totalCost : null)) : null;
   const monthCost = usageState === "ok" && usage ? usage.monthCost : null;
   const topModels = mimoUsage ? MIMO_DEFAULT_MODELS.map((def) => mimoUsage.models.find((m) => m.key === def.key) ?? def) : MIMO_DEFAULT_MODELS;
+  const providerHistory = balanceHistory.filter((e) => e.provider === provider);
 
   return (
     <section className="panel dashboard-panel" data-testid="dashboard-panel">
@@ -280,15 +376,16 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
           <ProviderSelect provider={provider} onChange={onProviderChange} />
         </div>
         <div className="header-actions">
-          <button aria-label="刷新" onClick={onRefresh}><RefreshCw size={22} /></button>
+          <button aria-label={t("nav.refresh")} onClick={onRefresh}><RefreshCw size={22} /></button>
           <div className="skin-menu-wrap">
-            <button aria-label="Toggle theme" className="skin-toggle" title="切换主题" onClick={() => { const cur = localStorage.getItem("ui-theme") || "light"; const next = cur === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", next); localStorage.setItem("ui-theme", next); void invoke<AppConfig>("save_theme", { theme: next }).catch(console.warn); }}><Shirt size={21} /></button>
+            <button aria-label={t("nav.theme")} className="skin-toggle" title={t("nav.theme")} onClick={() => { const cur = localStorage.getItem("ui-theme") || "light"; const next = cur === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", next); localStorage.setItem("ui-theme", next); void invoke<AppConfig>("save_theme", { theme: next }).catch(console.warn); }}><Shirt size={21} /></button>
           </div>
-          <button aria-label="设置" onClick={onSettings}><Settings size={23} /></button>
-          <button aria-label="关闭" onClick={onClose}><X size={25} /></button>
+          <button aria-label={t("nav.settings")} onClick={onSettings}><Settings size={23} /></button>
+          <button aria-label={t("nav.close")} onClick={onClose}><X size={25} /></button>
         </div>
       </header>
       <BalanceCard balance={balance} state={balanceState} error={balanceError} todayCost={todayCost} monthCost={monthCost} provider={provider} currency={currency} exchangeRate={exchangeRate} />
+      <BalanceHistoryCard history={providerHistory} />
       <div className="usage-stack">
         {isDeepSeek ? (
           <>
@@ -308,7 +405,7 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
 function ProviderSelect({ provider, onChange }: { provider: Provider; onChange: (p: Provider) => void }) {
   return (
     <button className="provider-toggle" onClick={() => onChange(provider === "deepseek" ? "mimo" : "deepseek")}>
-      {provider === "deepseek" ? "DeepSeek Monitor" : "MiMo Monitor"}
+      {provider === "deepseek" ? t("provider.deepseek_monitor") : t("provider.mimo_monitor")}
       <span className="provider-arrow">⇄</span>
     </button>
   );

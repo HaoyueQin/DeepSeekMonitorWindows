@@ -195,6 +195,20 @@ Rust 后端依赖：
 
 完整发布记录见 GitHub Releases。
 
+### v2.6.0
+
+- **多账户管理**：设置→账户 支持添加/切换/删除多个 DeepSeek API 账户，余额和用量按当前账户查询，旧配置自动迁移为默认账户。
+- **余额走势图**：主面板新增余额走势卡片（7/30/90 天切换），每次成功查询余额自动记录快照，本地保留 180 天。
+- **图表模式切换**：缓存命中明细支持柱状图/折线图切换。
+- **导出日期范围筛选**：导出使用数据支持按月份范围过滤，CSV 格式升级为按日期展开的可读行。
+- **历史数据深度**：设置→数据 可配置主面板加载的历史月份数（12/24/36 个月），MiMo 与 DeepSeek 均生效。
+- **i18n 全覆盖**：主面板、模型详情页、设置页全部界面文本接入 zh/en 双语。
+- **错误处理结构化**：后端引入统一 `AppError` 错误枚举（网络/解析/认证/超时/配置/IO/加密分类），命令层保持兼容。
+- **代码清理**：合并 `fetch_mimo_api` 冗余函数链（三合一），fast-path 复用统一调用消除重复 JS 构造；删除死代码（`REFRESH_OPTIONS`、`refreshAll`、`in_progress_month`）；`StoredConfig` 全部字段补 `serde(default)` 修复旧配置兼容。
+- **Bug 修复**：修复 `loadUsage` 中 DeepSeek 用量查询结果从不写回缓存（每次启动全量重拉 12 个月）的问题；MiMo/DeepSeek 低余额通知逻辑统一。
+- **测试**：Rust 单元测试 35 个（config/deepseek/mimo 解析与聚合逻辑）；前端 Vitest 26 个（utils + 组件 + App 集成流程）。
+- **CI**：新增 GitHub Actions workflow（前端 tsc/vitest/build + Rust check/clippy/test + MiMo 性能验证脚本）。
+
 ### v2.5.5
 
 - **修复 MiMo 用量查询致命慢速**：解决每轮查询需 30 秒的关键 bug，修复后首次页面提取获取 ph 后，后续查询毫秒级返回。

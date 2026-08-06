@@ -16,8 +16,8 @@ const LOG_TRUNCATE_LEN: usize = 500;
 use tauri::{Emitter, Manager};
 
 use crate::modules::types::{
-    CallbackServerPort, MimoBalanceResult, MimoUsageDay, MimoUsageDayModel, MimoUsageModel,
-    MimoUsageResult, UsageDetailItem,
+    AppError, CallbackServerPort, MimoBalanceResult, MimoUsageDay, MimoUsageDayModel,
+    MimoUsageModel, MimoUsageResult, UsageDetailItem,
 };
 use crate::modules::config::{read_stored_config, write_stored_config};
 
@@ -27,6 +27,7 @@ use crate::modules::config::{read_stored_config, write_stored_config};
 pub const MIMO_INTERCEPT_JS: &str = r#"
     (function() {
         if (window.__mimo_hooked) return;
+        window.__mimo_hooked = true;
         window.__mimo_ph = null;
         window.__mimo_detail = null;
         var ALLOWED = ['platform.xiaomimimo.com'];
@@ -68,7 +69,6 @@ pub const MIMO_INTERCEPT_JS: &str = r#"
         };
         // 定期扫描 ph
         setInterval(function() { if (!window.__mimo_ph) __extractPh(); }, 1000);
-        window.__mimo_hooked = true;
     })();
 "#;
 
@@ -77,7 +77,7 @@ pub const MIMO_INTERCEPT_JS: &str = r#"
 use std::sync::Mutex as StdMutex;
 static MIMO_WEBVIEW_LOCK: StdMutex<()> = StdMutex::new(());
 
-pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, AppError> {
     // 快速路径：窗口已存在，无需持锁
     if let Some(window) = app.get_webview_window("mimo-sync") {
         return Ok(window);
@@ -91,7 +91,7 @@ pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::Webview
     let url = tauri::WebviewUrl::External(
         "https://platform.xiaomimimo.com/console/balance"
             .parse()
-            .map_err(|_| "无效 URL".to_string())?,
+            .map_err(|_| AppError::Other("无效 URL".to_string()))?,
     );
     tauri::WebviewWindowBuilder::new(app, "mimo-sync", url)
         .title("小米 MiMo 控制台")
@@ -109,37 +109,22 @@ pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::Webview
         })
         .initialization_script(MIMO_INTERCEPT_JS)
         .build()
-        .map_err(|error| format!("打开 MiMo 页面失败：{error}"))
+        .map_err(|error| AppError::Other(format!("打开 MiMo 页面失败：{error}")))
 }
 
 // ─── 通用 API 调用 ──────────────────────────────────────
 
+/// 在 MiMo WebView 中执行一次 fetch，结果经 127.0.0.1 回调服务器回传。
+///
+/// `method` 取值 "GET"/"POST"，`body` 为已序列化的 JSON 字符串（POST 时使用）。
+/// 仅在 eval JS 的瞬间持有全局锁，等待回调时不持锁，允许多个请求并发 pending。
 pub async fn fetch_mimo_api(
-    app: &tauri::AppHandle,
-    path: &str,
-    timeout_secs: u64,
-) -> Result<String, String> {
-    fetch_mimo_api_with_method(app, path, "GET", timeout_secs).await
-}
-
-pub async fn fetch_mimo_api_with_method(
-    app: &tauri::AppHandle,
-    path: &str,
-    method: &str,
-    timeout_secs: u64,
-) -> Result<String, String> {
-    fetch_mimo_api_with_method_and_body(app, path, method, timeout_secs, None).await
-}
-
-pub async fn fetch_mimo_api_with_method_and_body(
     app: &tauri::AppHandle,
     path: &str,
     method: &str,
     timeout_secs: u64,
     body: Option<&str>,
-) -> Result<String, String> {
-    // 不再全程持锁：只在 eval JS 的瞬间持锁，等待回调时不持锁。
-    // WebView2 的 JS fetch 是异步的，多个 fetch 可以同时 pending 并发执行。
+) -> Result<String, AppError> {
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
 
     let window = ensure_mimo_webview_sync(app)?;
@@ -171,11 +156,11 @@ pub async fn fetch_mimo_api_with_method_and_body(
     let safe_url = serde_json::to_string(&api_url).unwrap_or_else(|_| "\"\"".to_string());
     let safe_req_id = serde_json::to_string(&req_id).unwrap_or_else(|_| "\"\"".to_string());
     let safe_method = serde_json::to_string(method).unwrap_or_else(|_| "\"GET\"".to_string());
-    // 构造 JS：如果 body 存在则带上 body（用于 detail API 的 POST 请求）
-    let js = if let Some(body_str) = body {
-        let safe_body = serde_json::to_string(body_str).unwrap_or_else(|_| "\"\"".to_string());
-        format!(
-            r#"(async function() {{
+    let safe_body = body
+        .map(|b| serde_json::to_string(b).unwrap_or_else(|_| "\"\"".to_string()))
+        .unwrap_or_else(|| "null".to_string());
+    let js = format!(
+        r#"(async function() {{
                 try {{
                     var r = await fetch({safe_url}, {{
                         method: {safe_method},
@@ -199,42 +184,14 @@ pub async fn fetch_mimo_api_with_method_and_body(
                     }});
                 }}
             }})()"#,
-            port = cb_port,
-        )
-    } else {
-        format!(
-            r#"(async function() {{
-                try {{
-                    var r = await fetch({safe_url}, {{
-                        method: {safe_method},
-                        credentials: 'include',
-                        headers: {{ 'Accept': 'application/json' }}
-                    }});
-                    var t = await r.text();
-                    fetch('http://127.0.0.1:{port}/mimo-callback', {{
-                        method: 'POST',
-                        mode: 'cors',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ reqId: {safe_req_id}, data: t }})
-                    }});
-                }} catch(e) {{
-                    fetch('http://127.0.0.1:{port}/mimo-callback', {{
-                        method: 'POST',
-                        mode: 'cors',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ reqId: {safe_req_id}, data: 'ERROR:' + e.message }})
-                    }});
-                }}
-            }})()"#,
-            port = cb_port,
-        )
-    };
+        port = cb_port,
+    );
     // 仅在 eval JS 的瞬间持锁，注入后立即释放，允许并发 fetch
     {
         let _lock = lock_guard.lock().await;
         window
             .eval(&js)
-            .map_err(|e| format!("注入脚本失败：{e}"))?;
+            .map_err(|e| AppError::Other(format!("注入脚本失败：{e}")))?;
     }
     log::info!("[MiMo] fetch_api JS injected ({} chars), waiting for callback on port {} req={}", js.len(), cb_port, &req_id[..req_id.len().min(20)]);
 
@@ -242,10 +199,13 @@ pub async fn fetch_mimo_api_with_method_and_body(
     match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(data)) => {
             if data.starts_with("ERROR:") {
-                return Err(format!("MiMo API 请求失败：{}", &data[6..]));
+                return Err(AppError::Other(format!(
+                    "MiMo API 请求失败：{}",
+                    data.strip_prefix("ERROR:").unwrap_or("")
+                )));
             }
             if data.is_empty() || data.starts_with('<') {
-                return Err("MiMo API 返回为空或 HTML，请确认已登录".to_string());
+                return Err(AppError::Other("MiMo API 返回为空或 HTML，请确认已登录".to_string()));
             }
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
                 if val.get("code").and_then(|v| v.as_i64()) == Some(401) {
@@ -262,32 +222,37 @@ pub async fn fetch_mimo_api_with_method_and_body(
                     if let Some(url) = login_url {
                         // Use serde_json::to_string for proper JS string escaping
                         let safe_url = serde_json::to_string(url).unwrap_or_default();
-                        let _ = window.eval(&format!(
-                            "window.location.href={}",
-                            safe_url
-                        ));
+                        let _ = window
+                            .eval(format!("window.location.href={}", safe_url));
                     } else {
                         let _ = window.eval("window.location.href='https://account.xiaomi.com/pass/serviceLogin?sid=platform.xiaomimimo.com'");
                     }
                     let _ = app.emit("mimo-auth-required", ());
-                    return Err("MiMo 未登录，请在弹出的窗口中完成登录后重试".to_string());
+                    return Err(AppError::Auth(
+                        "MiMo 未登录，请在弹出的窗口中完成登录后重试".to_string(),
+                    ));
                 }
             }
             Ok(data)
         }
-        Ok(Err(_)) => Err("数据接收通道关闭".to_string()),
+        Ok(Err(_)) => Err(AppError::Other("数据接收通道关闭".to_string())),
         Err(_) => {
-            log::warn!("[MiMo] fetch_api TIMEOUT after {}s, path={} port={}", timeout_secs, path, cb_port);
+            log::warn!(
+                "[MiMo] fetch_api TIMEOUT after {}s, path={} port={}",
+                timeout_secs,
+                path,
+                cb_port
+            );
             let state =
                 app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
             let mut map = state.lock().unwrap();
             map.remove(&req_id);
-            Err("MiMo API 请求超时".to_string())
+            Err(AppError::Timeout)
         }
     }
 }
 
-fn parse_mimo_api_response<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, String> {
+fn parse_mimo_api_response<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, AppError> {
     #[derive(Deserialize)]
     struct ApiEnvelope<T2> {
         code: i32,
@@ -297,22 +262,22 @@ fn parse_mimo_api_response<T: serde::de::DeserializeOwned>(json: &str) -> Result
         data: Option<T2>,
     }
     let envelope: ApiEnvelope<T> =
-        serde_json::from_str(json).map_err(|e| format!("解析响应失败：{e}"))?;
+        serde_json::from_str(json).map_err(|e| AppError::Parse(format!("解析响应失败：{e}")))?;
     if envelope.code != 0 {
-        return Err(format!(
+        return Err(AppError::Other(format!(
             "MiMo API 返回错误 code={}: {}",
             envelope.code, envelope.message
-        ));
+        )));
     }
     envelope
         .data
-        .ok_or_else(|| "MiMo API 返回空数据".to_string())
+        .ok_or_else(|| AppError::Other("MiMo API 返回空数据".to_string()))
 }
 
 // ─── 余额查询 ────────────────────────────────────────────
 
-pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalanceResult, String> {
-    let json = fetch_mimo_api(app, "/api/v1/balance", 15).await?;
+pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalanceResult, AppError> {
+    let json = fetch_mimo_api(app, "/api/v1/balance", "GET", 15, None).await?;
     log::debug!("[MiMo] /api/v1/balance response received ({} chars)", json.len());
 
     #[derive(Deserialize)]
@@ -379,7 +344,7 @@ pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalance
     }
     log::warn!("[MiMo] balance AccountOverview parse also failed");
 
-    Err("无法解析 MiMo 余额接口返回的数据".to_string())
+    Err(AppError::Parse("无法解析 MiMo 余额接口返回的数据".to_string()))
 }
 
 // ─── 用量查询 ────────────────────────────────────────────
@@ -388,8 +353,8 @@ pub async fn do_fetch_mimo_usage(
     app: &tauri::AppHandle,
     month: u32,
     year: u32,
-) -> Result<MimoUsageResult, String> {
-    let overview_json = fetch_mimo_api(app, "/api/v1/usage", 15).await?;
+) -> Result<MimoUsageResult, AppError> {
+    let overview_json = fetch_mimo_api(app, "/api/v1/usage", "GET", 15, None).await?;
     log::debug!(
         "[MiMo] /api/v1/usage response ({} bytes)",
         overview_json.len()
@@ -604,7 +569,7 @@ pub async fn do_fetch_mimo_usage(
 
 // ─── Detail 提取 ─────────────────────────────────────────
 
-fn parse_detail_items(json: &str) -> Result<Vec<UsageDetailItem>, String> {
+fn parse_detail_items(json: &str) -> Result<Vec<UsageDetailItem>, AppError> {
     log::info!(
         "[MiMo] parse_detail_items raw (first 1000): {}",
         &json[..json.len().min(1000)]
@@ -618,10 +583,10 @@ fn parse_detail_items(json: &str) -> Result<Vec<UsageDetailItem>, String> {
     }
     let r: R = serde_json::from_str(json).map_err(|e| {
         log::warn!("[MiMo] parse_detail_items error: {}", e);
-        e.to_string()
+        AppError::Parse(e.to_string())
     })?;
     if r.code != 0 {
-        return Err(format!("code={}", r.code));
+        return Err(AppError::Other(format!("code={}", r.code)));
     }
     let items = r.data.unwrap_or_default();
     log::debug!("[MiMo] parse_detail_items: {} items parsed", items.len());
@@ -632,74 +597,41 @@ async fn fetch_mimo_usage_detail(
     app: &tauri::AppHandle,
     month: u32,
     year: u32,
-) -> Result<Vec<UsageDetailItem>, String> {
-    // 1. 先用缓存的 ph 尝试直接调用 API（快速路径）
+) -> Result<Vec<UsageDetailItem>, AppError> {
+    // 1. 先用缓存的 ph 尝试直接调用 API（快速路径，毫秒级返回）
     {
         let config = read_stored_config()?;
         if let Some(ref ph) = config.mimo_ph {
             log::debug!("[MiMo] detail: trying cached ph");
             // 正确构造 JSON body：{"year":2026,"month":6}
-            // 注意：format! 中 \" 产生一个引号字符，而非反斜杠+引号
             let body_json = format!("{{\"year\":{},\"month\":{}}}", year, month);
             let api_url = format!("/api/v1/usage/detail/list?api-platform_ph={}", ph);
-            let full_url = format!("https://platform.xiaomimimo.com{}", api_url);
-            let cb_port = app.state::<Mutex<CallbackServerPort>>().lock().unwrap().0;
-            let req_id = format!("__fp_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let (tx, rx) = oneshot::channel();
-            {
-                let state = app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
-                state.lock().unwrap().insert(req_id.clone(), tx);
-            }
-            let safe_url = serde_json::to_string(&full_url).unwrap_or_default();
-            let safe_body = serde_json::to_string(&body_json).unwrap_or_default();
-            let safe_req_id = serde_json::to_string(&req_id).unwrap_or_default();
-            let js = format!(
-                r#"(async function() {{
-                    try {{
-                        var r = await fetch({safe_url}, {{
-                            method: 'POST',
-                            credentials: 'include',
-                            headers: {{ 'Accept': 'application/json', 'Content-Type': 'application/json' }},
-                            body: {safe_body}
-                        }});
-                        var t = await r.text();
-                        fetch('http://127.0.0.1:{port}/mimo-callback', {{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:{safe_req_id},data:t}})}});
-                    }} catch(e) {{
-                        fetch('http://127.0.0.1:{port}/mimo-callback', {{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:{safe_req_id},data:'ERROR:'+e.message}})}});
-                    }}
-                }})()"#,
-                port = cb_port, safe_url = safe_url, safe_body = safe_body, safe_req_id = safe_req_id,
-            );
-            let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
-            let window = ensure_mimo_webview_sync(app)?;
-            // 仅在 eval JS 的瞬间持锁，等待回调时不持锁，允许并发 fast-path
-            {
-                let _lock = lock_guard.lock().await;
-                let _ = window.eval(&js);
-            }
-            let json = match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
-                Ok(Ok(data)) => data,
-                _ => {
-                    log::info!("[MiMo] detail fast-path timeout/channel error, falling back to page extraction");
-                    String::new()
-                }
-            };
-            {
-                log::info!(
-                    "[MiMo] detail fast-path response (first 500): {}",
-                    &json[..json.len().min(LOG_TRUNCATE_LEN)]
-                );
-                if let Ok(items) = parse_detail_items(&json) {
-                    if !items.is_empty() {
-                        log::info!("[MiMo] detail fast-path OK: {} items", items.len());
-                        return Ok(items);
-                    }
-                }
-                if json.contains("\"code\":401") {
+            let json = match fetch_mimo_api(app, &api_url, "POST", 10, Some(&body_json)).await {
+                Ok(j) => j,
+                Err(AppError::Auth(_)) => {
+                    // ph 已失效：清除缓存，静默降级到页面提取（页面提取有独立的 401 处理）
                     log::warn!("[MiMo] detail fast-path 401, clearing cached ph");
                     if let Ok(mut config) = read_stored_config() {
                         config.mimo_ph = None;
                         let _ = write_stored_config(&config);
+                    }
+                    String::new()
+                }
+                Err(_) => {
+                    // 超时/通道错误 → 回退到页面提取
+                    log::info!("[MiMo] detail fast-path timeout/channel error, falling back to page extraction");
+                    String::new()
+                }
+            };
+            log::info!(
+                "[MiMo] detail fast-path response (first 500): {}",
+                &json[..json.len().min(LOG_TRUNCATE_LEN)]
+            );
+            if !json.is_empty() {
+                if let Ok(items) = parse_detail_items(&json) {
+                    if !items.is_empty() {
+                        log::info!("[MiMo] detail fast-path OK: {} items", items.len());
+                        return Ok(items);
                     }
                 }
             }
@@ -713,11 +645,10 @@ async fn fetch_mimo_usage_detail(
     // fast-path 不受此限制——多个 fast-path 可并发（仅 eval JS fetch）。
     {
         let cache = app.state::<Mutex<crate::modules::types::MimoDetailCache>>();
-        let month_key = format!("{}-{:02}", year, month);
-        let can_start = cache.lock().unwrap().mark_in_progress(&month_key);
+        let can_start = cache.lock().unwrap().mark_in_progress();
         if !can_start {
             log::info!("[MiMo] detail page extraction already in progress, skipping");
-            return Err("page extraction already in progress".into());
+            return Err(AppError::Other("page extraction already in progress".into()));
         }
     }
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
@@ -728,7 +659,7 @@ async fn fetch_mimo_usage_detail(
         let _ = w.eval("window.__mimo_detail = null; window.__mimo_ph = null;");
         let usage_url: tauri::Url = format!("https://platform.xiaomimimo.com/console/usage?month={}-{:02}", year, month)
             .parse()
-            .map_err(|_| "无效 URL".to_string())?;
+            .map_err(|_| AppError::Other("无效 URL".to_string()))?;
         let _ = w.navigate(usage_url);
         w
     }; // 初始化完成后释放锁，避免阻塞并发的余额查询
@@ -820,7 +751,7 @@ async fn fetch_mimo_usage_detail(
                         let mut map = state.lock().unwrap();
                         map.insert(ph_req.clone(), ptx);
                     }
-                    let _ = window.eval(&format!(
+                    let _ = window.eval(format!(
                         r#"try{{var p=window.__mimo_ph||localStorage.getItem('mimo_platform_ph')||'';fetch('http://127.0.0.1:{port}/mimo-callback',{{method:'POST',mode:'cors',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{reqId:'{ph_req}',data:p}})}});}}catch(e){{}}"#,
                         port = cb_port, ph_req = ph_req,
                     ));
@@ -852,12 +783,14 @@ async fn fetch_mimo_usage_detail(
         let cache = app.state::<Mutex<crate::modules::types::MimoDetailCache>>();
         cache.lock().unwrap().clear_in_progress();
     }
-    Err("无法获取用量详情，请确认已登录 MiMo".to_string())
+    Err(AppError::Other(
+        "无法获取用量详情，请确认已登录 MiMo".to_string(),
+    ))
 }
 
 // ─── Sync ────────────────────────────────────────────────
 
-pub fn do_start_mimo_sync(app: &tauri::AppHandle) -> Result<bool, String> {
+pub fn do_start_mimo_sync(app: &tauri::AppHandle) -> Result<bool, AppError> {
     if let Some(window) = app.get_webview_window("mimo-sync") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -870,7 +803,7 @@ pub fn do_start_mimo_sync(app: &tauri::AppHandle) -> Result<bool, String> {
     Ok(false)
 }
 
-pub fn do_ensure_mimo_webview(app: &tauri::AppHandle) -> Result<(), String> {
+pub fn do_ensure_mimo_webview(app: &tauri::AppHandle) -> Result<(), AppError> {
     ensure_mimo_webview_sync(app).map(|_| ())
 }
 
@@ -878,7 +811,7 @@ pub fn do_mimo_api_response(
     app: &tauri::AppHandle,
     req_id: String,
     json: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let state =
         app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
     let mut map = state.lock().unwrap();
@@ -886,4 +819,127 @@ pub fn do_mimo_api_response(
         let _ = tx.send(json);
     }
     Ok(())
+}
+
+// ─── 单元测试 ────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_detail_items_empty_list() {
+        let json = r#"{"code":0,"data":[]}"#;
+        let items = parse_detail_items(json).unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn parse_detail_items_normal() {
+        let json = r#"{"code":0,"data":[{"date":"2026-06-01","model":"mimo-v2.5","totalToken":100,"inputHitToken":60,"inputMissToken":20,"outputToken":20,"requestCount":3,"consumedAmount":"0.0123"}]}"#;
+        let items = parse_detail_items(json).unwrap();
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.date, "2026-06-01");
+        assert_eq!(item.model, "mimo-v2.5");
+        assert_eq!(item.total_token, 100);
+        assert_eq!(item.input_hit_token, 60);
+        assert_eq!(item.input_miss_token, 20);
+        assert_eq!(item.output_token, 20);
+        assert_eq!(item.request_count, 3);
+        assert_eq!(item.consumed_amount, "0.0123");
+    }
+
+    #[test]
+    fn parse_detail_items_nonzero_code() {
+        let json = r#"{"code":401,"data":null}"#;
+        let err = parse_detail_items(json).unwrap_err();
+        assert!(err.to_string().contains("code=401"));
+    }
+
+    #[test]
+    fn parse_detail_items_invalid_json() {
+        let err = parse_detail_items("not json").unwrap_err();
+        assert!(matches!(err, AppError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_detail_items_defaults_missing_fields() {
+        let json = r#"{"code":0,"data":[{"date":"2026-06-02"}]}"#;
+        let items = parse_detail_items(json).unwrap();
+        assert_eq!(items[0].total_token, 0);
+        assert_eq!(items[0].model, "");
+        assert_eq!(items[0].consumed_amount, "");
+    }
+
+    #[test]
+    fn parse_envelope_ok() {
+        let json = r#"{"code":0,"message":"ok","data":{"total":1}}"#;
+        let v: serde_json::Value = parse_mimo_api_response(json).unwrap();
+        assert_eq!(v["total"], 1);
+    }
+
+    #[test]
+    fn parse_envelope_error_code() {
+        let json = r#"{"code":500,"message":"boom","data":null}"#;
+        let err = parse_mimo_api_response::<serde_json::Value>(json).unwrap_err();
+        assert!(err.to_string().contains("code=500"));
+        assert!(err.to_string().contains("boom"));
+    }
+
+    #[test]
+    fn parse_envelope_null_data() {
+        let json = r#"{"code":0,"data":null}"#;
+        let err = parse_mimo_api_response::<serde_json::Value>(json).unwrap_err();
+        assert!(err.to_string().contains("空数据"));
+    }
+
+    #[test]
+    fn usage_aggregation_filters_other_months() {
+        // 模拟 do_fetch_mimo_usage 的聚合逻辑：跨月数据被过滤
+        let items = vec![
+            UsageDetailItem {
+                date: "2026-06-01".into(),
+                model: "mimo-v2.5".into(),
+                total_token: 100,
+                input_hit_token: 60,
+                input_miss_token: 20,
+                output_token: 20,
+                request_count: 3,
+                consumed_amount: "0.01".into(),
+            },
+            UsageDetailItem {
+                date: "2026-05-31".into(), // 其他月份 → 忽略
+                model: "mimo-v2.5".into(),
+                total_token: 999,
+                input_hit_token: 999,
+                input_miss_token: 0,
+                output_token: 0,
+                request_count: 1,
+                consumed_amount: "9.99".into(),
+            },
+        ];
+        let month_prefix = "2026-06";
+        let mut models_map: HashMap<String, MimoUsageModel> = HashMap::new();
+        let mut total = 0u64;
+        for item in &items {
+            if !item.date.starts_with(month_prefix) {
+                continue;
+            }
+            let e = models_map.entry(item.model.clone()).or_insert_with(|| MimoUsageModel {
+                key: item.model.clone(),
+                name: item.model.clone(),
+                total_tokens: 0,
+                request_count: 0,
+                cache_hit_tokens: 0,
+                cache_miss_tokens: 0,
+                response_tokens: 0,
+                cost: 0.0,
+            });
+            e.total_tokens += item.total_token;
+            total += item.total_token;
+        }
+        assert_eq!(total, 100);
+        assert_eq!(models_map["mimo-v2.5"].total_tokens, 100);
+    }
 }

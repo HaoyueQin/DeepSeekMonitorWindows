@@ -22,6 +22,23 @@ export type AppConfig = {
   notifyCooldownMinutes: number;
   alwaysOnTop: boolean;
   autoClearOldCache: boolean;
+  usageHistoryMonths: number;
+  accounts: AccountSummary[];
+  activeAccountId: string | null;
+};
+
+export type AccountSummary = {
+  id: string;
+  name: string;
+  apiKeyConfigured: boolean;
+  usageTokenConfigured: boolean;
+};
+
+export type BalanceHistoryEntry = {
+  provider: Provider;
+  date: string;
+  balance: number;
+  currency: string;
 };
 
 export type BalanceData = {

@@ -19,37 +19,39 @@ use serde::Deserialize;
 use tauri::{Emitter, Manager};
 use tauri::webview::PageLoadEvent;
 
-use crate::modules::types::{BalanceResult, UsageDaySummary, UsageModelSummary, UsageResult};
-use crate::modules::config::{read_stored_config, write_stored_config, to_app_config};
-use crate::modules::types::AppConfig;
+use crate::modules::types::{
+    AppError, AppConfig, BalanceResult, UsageDaySummary, UsageModelSummary, UsageResult,
+};
+use crate::modules::config::{
+    active_api_key, active_usage_token, read_stored_config, to_app_config, write_stored_config,
+};
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
 const REQUEST_TIMEOUT_SECS: u64 = 15;
 
 // ─── 余额查询 ────────────────────────────────────────────
 
-pub async fn do_fetch_balance() -> Result<BalanceResult, String> {
+pub async fn do_fetch_balance() -> Result<BalanceResult, AppError> {
     let config = read_stored_config()?;
-    let api_key = config
-        .api_key
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "未配置 API Key".to_string())?;
+    let api_key = active_api_key(&config).ok_or(AppError::NoApiKey)?;
 
     let client = reqwest::Client::new();
     let response = client
         .get("https://api.deepseek.com/user/balance")
-        .bearer_auth(&api_key)
+        .bearer_auth(api_key)
         .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await
-        .map_err(|error| format!("网络请求失败：{error}"))?;
+        .map_err(|error| AppError::Network(format!("网络请求失败：{error}")))?;
 
     match response.status().as_u16() {
         200 => {}
-        401 => return Err("API Key 无效或已过期".to_string()),
-        429 => return Err("请求过于频繁，请稍后再试".to_string()),
-        code if code >= 500 => return Err(format!("DeepSeek 服务器错误：{code}")),
-        code => return Err(format!("请求失败：HTTP {code}")),
+        401 => return Err(AppError::Auth("API Key 无效或已过期".to_string())),
+        429 => return Err(AppError::Other("请求过于频繁，请稍后再试".to_string())),
+        code if code >= 500 => {
+            return Err(AppError::Http(code));
+        }
+        code => return Err(AppError::Http(code)),
     }
 
     #[derive(Deserialize)]
@@ -68,13 +70,13 @@ pub async fn do_fetch_balance() -> Result<BalanceResult, String> {
     let data: BalanceResponse = response
         .json()
         .await
-        .map_err(|error| format!("解析余额数据失败：{error}"))?;
+        .map_err(|error| AppError::Parse(format!("解析余额数据失败：{error}")))?;
 
     let info = data
         .balance_infos
         .into_iter()
         .next()
-        .ok_or_else(|| "余额信息为空".to_string())?;
+        .ok_or_else(|| AppError::Parse("余额信息为空".to_string()))?;
 
     Ok(BalanceResult {
         is_available: data.is_available,
@@ -87,33 +89,94 @@ pub async fn do_fetch_balance() -> Result<BalanceResult, String> {
 
 // ─── Token 管理 ──────────────────────────────────────────
 
-pub fn do_save_usage_token(usage_token: String) -> Result<AppConfig, String> {
+pub fn do_save_usage_token(usage_token: String) -> Result<AppConfig, AppError> {
     let value = usage_token.trim().to_string();
     if value.is_empty() {
-        return Err("用量 Token 不能为空".to_string());
+        return Err("用量 Token 不能为空".into());
     }
     let mut config = read_stored_config()?;
-    config.usage_token = Some(value);
+    if let Some(id) = config.active_account.clone() {
+        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
+            acc.usage_token = Some(value.clone());
+        } else {
+            config.usage_token = Some(value);
+        }
+    } else {
+        config.usage_token = Some(value);
+    }
     write_stored_config(&config)?;
     to_app_config(config)
 }
 
-pub fn do_clear_usage_token() -> Result<AppConfig, String> {
+pub fn do_clear_usage_token() -> Result<AppConfig, AppError> {
     let mut config = read_stored_config()?;
-    config.usage_token = None;
+    if let Some(id) = config.active_account.clone() {
+        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
+            acc.usage_token = None;
+        } else {
+            config.usage_token = None;
+        }
+    } else {
+        config.usage_token = None;
+    }
+    write_stored_config(&config)?;
+    to_app_config(config)
+}
+
+/// 保存 API Key 到当前活跃账户（由 lib.rs save_api_key 使用）
+pub fn do_save_api_key(api_key: String) -> Result<AppConfig, AppError> {
+    let value = api_key.trim().to_string();
+    if value.is_empty() {
+        return Err("API Key 不能为空".into());
+    }
+    let mut config = read_stored_config()?;
+    if let Some(id) = config.active_account.clone() {
+        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
+            acc.api_key = Some(value.clone());
+        } else {
+            config.api_key = Some(value);
+        }
+    } else {
+        config.api_key = Some(value);
+    }
+    write_stored_config(&config)?;
+    to_app_config(config)
+}
+
+/// 清除当前活跃账户的 API Key（由 lib.rs clear_api_key 使用）
+pub fn do_clear_api_key() -> Result<AppConfig, AppError> {
+    let mut config = read_stored_config()?;
+    if let Some(id) = config.active_account.clone() {
+        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
+            acc.api_key = None;
+        } else {
+            config.api_key = None;
+        }
+    } else {
+        config.api_key = None;
+    }
     write_stored_config(&config)?;
     to_app_config(config)
 }
 
 const USAGE_TOKEN_TITLE_PREFIX: &str = "DSM_USAGE_TOKEN:";
 
-pub fn capture_usage_token(app: &tauri::AppHandle, token: String) -> Result<AppConfig, String> {
+pub fn capture_usage_token(app: &tauri::AppHandle, token: String) -> Result<AppConfig, AppError> {
     let value = token.trim().to_string();
     if value.is_empty() {
-        return Err("用量 Token 为空".to_string());
+        return Err("用量 Token 为空".into());
     }
     let mut config = read_stored_config()?;
-    config.usage_token = Some(value);
+    // 网页登录同步的 Token 写入当前活跃账户
+    if let Some(id) = config.active_account.clone() {
+        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
+            acc.usage_token = Some(value.clone());
+        } else {
+            config.usage_token = Some(value);
+        }
+    } else {
+        config.usage_token = Some(value);
+    }
     write_stored_config(&config)?;
     let app_config = to_app_config(config)?;
 
@@ -129,7 +192,7 @@ pub fn capture_usage_token(app: &tauri::AppHandle, token: String) -> Result<AppC
     Ok(app_config)
 }
 
-pub async fn verify_usage_token(token: &str, month: u32, year: u32) -> Result<(), String> {
+pub async fn verify_usage_token(token: &str, month: u32, year: u32) -> Result<(), AppError> {
     let ua = USER_AGENT;
     let url =
         format!("https://platform.deepseek.com/api/v0/usage/amount?month={month}&year={year}");
@@ -142,11 +205,14 @@ pub async fn verify_usage_token(token: &str, month: u32, year: u32) -> Result<()
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .send()
         .await
-        .map_err(|error| format!("验证 token 失败：{error}"))?;
+        .map_err(|error| AppError::Network(format!("验证 token 失败：{error}")))?;
     if resp.status().as_u16() == 200 {
         Ok(())
     } else {
-        Err(format!("token 无效：HTTP {}", resp.status().as_u16()))
+        Err(AppError::Auth(format!(
+            "token 无效：HTTP {}",
+            resp.status().as_u16()
+        )))
     }
 }
 
@@ -333,7 +399,7 @@ pub const USAGE_SYNC_POLL_JS: &str = r#"
 })();
 "#;
 
-pub fn start_usage_sync(app: &tauri::AppHandle) -> Result<bool, String> {
+pub fn start_usage_sync(app: &tauri::AppHandle) -> Result<bool, AppError> {
     if let Some(flag) = app.try_state::<Arc<AtomicBool>>() {
         flag.store(false, Ordering::SeqCst);
     }
@@ -350,7 +416,7 @@ pub fn start_usage_sync(app: &tauri::AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let url = tauri::WebviewUrl::External("https://platform.deepseek.com".parse().map_err(|_| "无效 URL".to_string())?);
+    let url = tauri::WebviewUrl::External("https://platform.deepseek.com".parse().map_err(|_| AppError::Other("无效 URL".to_string()))?);
     tauri::WebviewWindowBuilder::new(app, "login-sync", url)
         .title("DeepSeek 账号登录")
         .inner_size(480.0, 720.0)
@@ -375,7 +441,7 @@ pub fn start_usage_sync(app: &tauri::AppHandle) -> Result<bool, String> {
             }
         })
         .build()
-        .map_err(|error| format!("打开登录窗口失败：{error}"))?;
+        .map_err(|error| AppError::Other(format!("打开登录窗口失败：{error}")))?;
     start_usage_title_watcher(app.clone());
     Ok(false)
 }
@@ -385,10 +451,10 @@ pub async fn do_usage_token_captured(
     token: String,
     month: u32,
     year: u32,
-) -> Result<AppConfig, String> {
+) -> Result<AppConfig, AppError> {
     let value = token.trim().to_string();
     if value.is_empty() {
-        return Err("用量 Token 为空".to_string());
+        return Err("用量 Token 为空".into());
     }
     verify_usage_token(&value, month, year).await?;
     capture_usage_token(app, value)
@@ -396,61 +462,58 @@ pub async fn do_usage_token_captured(
 
 // ─── 用量查询 ────────────────────────────────────────────
 
-pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, String> {
-    let config = read_stored_config()?;
-    let token = config
-        .usage_token
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "未配置用量 Token".to_string())?;
+#[derive(Deserialize)]
+struct Entry {
+    #[serde(rename = "type")]
+    kind: String,
+    amount: String,
+}
+#[derive(Deserialize)]
+struct ModelUsage {
+    model: String,
+    usage: Vec<Entry>,
+}
+#[derive(Deserialize)]
+struct DayUsage {
+    date: String,
+    data: Vec<ModelUsage>,
+}
+#[derive(Deserialize)]
+struct AmountBiz {
+    total: Vec<ModelUsage>,
+    days: Vec<DayUsage>,
+}
+#[derive(Deserialize)]
+struct AmountData {
+    biz_data: AmountBiz,
+}
+#[derive(Deserialize)]
+struct AmountResp {
+    data: AmountData,
+}
+#[derive(Deserialize)]
+struct CostBiz {
+    total: Vec<ModelUsage>,
+    days: Vec<DayUsage>,
+}
+#[derive(Deserialize)]
+struct CostData {
+    biz_data: Vec<CostBiz>,
+}
+#[derive(Deserialize)]
+struct CostResp {
+    data: CostData,
+}
 
-    #[derive(Deserialize)]
-    struct Entry {
-        #[serde(rename = "type")]
-        kind: String,
-        amount: String,
-    }
-    #[derive(Deserialize)]
-    struct ModelUsage {
-        model: String,
-        usage: Vec<Entry>,
-    }
-    #[derive(Deserialize)]
-    struct DayUsage {
-        date: String,
-        data: Vec<ModelUsage>,
-    }
-    #[derive(Deserialize)]
-    struct AmountBiz {
-        total: Vec<ModelUsage>,
-        days: Vec<DayUsage>,
-    }
-    #[derive(Deserialize)]
-    struct AmountData {
-        biz_data: AmountBiz,
-    }
-    #[derive(Deserialize)]
-    struct AmountResp {
-        data: AmountData,
-    }
-    #[derive(Deserialize)]
-    struct CostBiz {
-        total: Vec<ModelUsage>,
-        days: Vec<DayUsage>,
-    }
-    #[derive(Deserialize)]
-    struct CostData {
-        biz_data: Vec<CostBiz>,
-    }
-    #[derive(Deserialize)]
-    struct CostResp {
-        data: CostData,
-    }
+pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, AppError> {
+    let config = read_stored_config()?;
+    let token = active_usage_token(&config).ok_or(AppError::NoUsageToken)?;
 
     async fn get_json<T: serde::de::DeserializeOwned>(
         client: &reqwest::Client,
         url: &str,
         token: &str,
-    ) -> Result<T, String> {
+    ) -> Result<T, AppError> {
         let ua = USER_AGENT;
         let resp = client
             .get(url)
@@ -461,53 +524,16 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, String
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .send()
             .await
-            .map_err(|error| format!("用量请求失败：{error}"))?;
+            .map_err(|error| AppError::Network(format!("用量请求失败：{error}")))?;
         match resp.status().as_u16() {
             200 => {}
-            401 => return Err("用量 Token 无效或已过期，请重新获取".to_string()),
-            429 => return Err("请求过于频繁，请稍后再试".to_string()),
-            code => return Err(format!("用量接口错误：HTTP {code}")),
+            401 => return Err(AppError::Auth("用量 Token 无效或已过期，请重新获取".to_string())),
+            429 => return Err(AppError::Other("请求过于频繁，请稍后再试".to_string())),
+            code => return Err(AppError::Http(code)),
         }
         resp.json::<T>()
             .await
-            .map_err(|error| format!("解析用量数据失败：{error}"))
-    }
-
-    fn token_breakdown(usage: &[Entry]) -> (u64, u64, u64, u64, u64) {
-        let mut total = 0u64;
-        let mut request = 0u64;
-        let mut hit = 0u64;
-        let mut miss = 0u64;
-        let mut response = 0u64;
-        for entry in usage {
-            let value = entry.amount.parse::<f64>().unwrap_or(0.0).max(0.0).min(u64::MAX as f64).round() as u64;
-            match entry.kind.as_str() {
-                "REQUEST" => request = value,
-                "PROMPT_CACHE_HIT_TOKEN" => {
-                    hit = value;
-                    total += value;
-                }
-                "PROMPT_CACHE_MISS_TOKEN" => {
-                    miss = value;
-                    total += value;
-                }
-                "RESPONSE_TOKEN" => {
-                    response = value;
-                    total += value;
-                }
-                "PROMPT_TOKEN" => total += value,
-                _ => {}
-            }
-        }
-        (total, request, hit, miss, response)
-    }
-
-    fn cost_sum(usage: &[Entry]) -> f64 {
-        usage
-            .iter()
-            .filter(|entry| entry.kind != "REQUEST")
-            .map(|entry| entry.amount.parse::<f64>().unwrap_or(0.0))
-            .sum()
+            .map_err(|error| AppError::Parse(format!("解析用量数据失败：{error}")))
     }
 
     let client = reqwest::Client::new();
@@ -516,8 +542,8 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, String
     let cost_url =
         format!("https://platform.deepseek.com/api/v0/usage/cost?month={month}&year={year}");
 
-    let amount: AmountResp = get_json(&client, &amount_url, &token).await?;
-    let cost: CostResp = get_json(&client, &cost_url, &token).await?;
+    let amount: AmountResp = get_json(&client, &amount_url, token).await?;
+    let cost: CostResp = get_json(&client, &cost_url, token).await?;
 
     let cost_total = cost.data.biz_data.first();
     let cost_for_model = |model: &str| -> f64 {
@@ -612,4 +638,128 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, String
         days,
         month_cost,
     })
+}
+
+// ─── 解析辅助（模块级，便于单元测试）────────────────────
+
+/// 将 DeepSeek usage 条目分解为 (total, request, hit, miss, response) tokens
+fn token_breakdown(usage: &[Entry]) -> (u64, u64, u64, u64, u64) {
+    let mut total = 0u64;
+    let mut request = 0u64;
+    let mut hit = 0u64;
+    let mut miss = 0u64;
+    let mut response = 0u64;
+    for entry in usage {
+        let value = entry.amount.parse::<f64>().unwrap_or(0.0).max(0.0).min(u64::MAX as f64).round() as u64;
+        match entry.kind.as_str() {
+            "REQUEST" => request = value,
+            "PROMPT_CACHE_HIT_TOKEN" => {
+                hit = value;
+                total += value;
+            }
+            "PROMPT_CACHE_MISS_TOKEN" => {
+                miss = value;
+                total += value;
+            }
+            "RESPONSE_TOKEN" => {
+                response = value;
+                total += value;
+            }
+            "PROMPT_TOKEN" => total += value,
+            _ => {}
+        }
+    }
+    (total, request, hit, miss, response)
+}
+
+fn cost_sum(usage: &[Entry]) -> f64 {
+    usage
+        .iter()
+        .filter(|entry| entry.kind != "REQUEST")
+        .map(|entry| entry.amount.parse::<f64>().unwrap_or(0.0))
+        .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(kind: &str, amount: &str) -> Entry {
+        Entry {
+            kind: kind.to_string(),
+            amount: amount.to_string(),
+        }
+    }
+
+    #[test]
+    fn breakdown_counts_expected_kinds() {
+        let usage = vec![
+            entry("REQUEST", "42"),
+            entry("PROMPT_CACHE_HIT_TOKEN", "100"),
+            entry("PROMPT_CACHE_MISS_TOKEN", "200"),
+            entry("RESPONSE_TOKEN", "50"),
+            entry("PROMPT_TOKEN", "30"),
+        ];
+        let (total, request, hit, miss, response) = token_breakdown(&usage);
+        assert_eq!(total, 380); // 100 + 200 + 50 + 30
+        assert_eq!(request, 42);
+        assert_eq!(hit, 100);
+        assert_eq!(miss, 200);
+        assert_eq!(response, 50);
+    }
+
+    #[test]
+    fn breakdown_unknown_kind_ignored() {
+        let usage = vec![entry("WEIRD_KIND", "999")];
+        let (total, request, hit, miss, response) = token_breakdown(&usage);
+        assert_eq!((total, request, hit, miss, response), (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn breakdown_handles_invalid_amounts() {
+        let usage = vec![
+            entry("PROMPT_CACHE_HIT_TOKEN", "abc"),
+            entry("PROMPT_CACHE_HIT_TOKEN", "-5"),
+            entry("PROMPT_CACHE_HIT_TOKEN", "10"),
+        ];
+        let (total, _, hit, _, _) = token_breakdown(&usage);
+        assert_eq!(total, 10);
+        assert_eq!(hit, 10);
+    }
+
+    #[test]
+    fn cost_sum_excludes_requests() {
+        let usage = vec![
+            entry("REQUEST", "99"),
+            entry("PROMPT_CACHE_HIT_TOKEN", "1.5"),
+            entry("RESPONSE_TOKEN", "2.5"),
+        ];
+        assert_eq!(cost_sum(&usage), 4.0);
+    }
+
+    #[test]
+    fn cost_sum_handles_invalid() {
+        let usage = vec![entry("PROMPT_TOKEN", "oops")];
+        assert_eq!(cost_sum(&usage), 0.0);
+    }
+
+    #[test]
+    fn extract_token_requires_context_markers() {
+        // 有 token 但缺少 id_profile/feature_gates 上下文 → 不匹配
+        let text = r#"{"token":"abcdefghijklmnopqrstuvwxyz"}"#;
+        assert!(extract_user_api_token(text).is_none());
+    }
+
+    #[test]
+    fn extract_token_with_context() {
+        let text = r#"{"user":{"token":"abcdefghijklmnopqrstuvwxyz123456","id_profile":"x","feature_gates":[]}}"#;
+        let token = extract_user_api_token(text);
+        assert_eq!(token.as_deref(), Some("abcdefghijklmnopqrstuvwxyz123456"));
+    }
+
+    #[test]
+    fn extract_token_skips_short_tokens() {
+        let text = r#"{"user":{"token":"short","id_profile":"x","feature_gates":[]}}"#;
+        assert!(extract_user_api_token(text).is_none());
+    }
 }

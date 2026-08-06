@@ -5,9 +5,9 @@ import { listen } from "@tauri-apps/api/event";
 
 import "./styles.css";
 
-import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel } from "./types";
+import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, AccountSummary, BalanceHistoryEntry } from "./types";
 import { fetchWithCache } from "./utils";
-import { initLang } from "./i18n";
+import { initLang, t } from "./i18n";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ModelDetailPanel } from "./components/ModelDetailPanel";
@@ -16,7 +16,7 @@ initLang();
 
 // ─── 缓存工具 ─────────────────────────────────────────────
 const CACHE_PREFIX = "dsm-usage-";
-const MONTHS_TO_KEEP = 12;
+const DEFAULT_HISTORY_MONTHS = 12;
 
 function cacheKey(provider: Provider, year: number, month: number) {
   return `${CACHE_PREFIX}${provider}-${year}-${String(month).padStart(2, '0')}`;
@@ -33,20 +33,20 @@ function setCached(provider: Provider, year: number, month: number, data: UsageR
   try { localStorage.setItem(cacheKey(provider, year, month), JSON.stringify(data)); } catch {}
 }
 
-/** 生成过去 12 个月列表（从本月往前数） */
-function yearMonths(): { year: number; month: number }[] {
+/** 生成过去 N 个月列表（从本月往前数） */
+function yearMonths(count: number): { year: number; month: number }[] {
   const now = new Date();
   const out: { year: number; month: number }[] = [];
-  for (let i = 0; i < MONTHS_TO_KEEP; i++) {
+  for (let i = 0; i < count; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     out.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
   }
   return out;
 }
 
-/** 清除超过 MONTHS_TO_KEEP 个月的缓存 */
-function clearOldCache(provider: Provider) {
-  const valid = new Set(yearMonths().map(m => cacheKey(provider, m.year, m.month)));
+/** 清除超过 historyMonths 个月的缓存 */
+function clearOldCache(provider: Provider, historyMonths: number) {
+  const valid = new Set(yearMonths(historyMonths).map(m => cacheKey(provider, m.year, m.month)));
   const toRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -104,46 +104,88 @@ function mergeMimo(months: MimoUsageResult[]): MimoUsageResult {
   };
 }
 
+// ─── 数据状态 reducer ────────────────────────────────────
+
+type DataState = {
+  balance: BalanceData | MimoBalanceData | null;
+  balanceState: BalanceState;
+  balanceError: string;
+  usage: UsageResult | MimoUsageResult | null;
+  usageState: BalanceState;
+  usageError: string;
+};
+
+type DataAction =
+  | { type: "BALANCE_LOADING" }
+  | { type: "BALANCE_OK"; balance: BalanceData | MimoBalanceData }
+  | { type: "BALANCE_ERR"; error: string }
+  | { type: "USAGE_LOADING" }
+  | { type: "USAGE_OK"; usage: UsageResult | MimoUsageResult }
+  | { type: "USAGE_ERR"; error: string }
+  | { type: "RESET" };
+
+const initialDataState: DataState = {
+  balance: null, balanceState: "loading", balanceError: "",
+  usage: null, usageState: "loading", usageError: "",
+};
+
+function dataReducer(state: DataState, action: DataAction): DataState {
+  switch (action.type) {
+    case "BALANCE_LOADING": return { ...state, balanceState: "loading", balanceError: "" };
+    case "BALANCE_OK": return { ...state, balance: action.balance, balanceState: "ok", balanceError: "" };
+    case "BALANCE_ERR": return { ...state, balance: null, balanceState: action.error.includes("未配置") ? "nokey" : "error", balanceError: action.error };
+    case "USAGE_LOADING": return { ...state, usageState: "loading", usageError: "" };
+    case "USAGE_OK": return { ...state, usage: action.usage, usageState: "ok", usageError: "" };
+    case "USAGE_ERR": return { ...state, usage: null, usageState: "error", usageError: action.error };
+    case "RESET": return { ...initialDataState, balanceState: "loading", usageState: "loading" };
+  }
+}
+
 // ─── App ───────────────────────────────────────────────────
 function App() {
   const [view, setView] = React.useState<ViewName>("dashboard");
   const [model, setModel] = React.useState<ModelName>("flash");
   const [provider, setProviderState] = React.useState<Provider>("deepseek");
-  const [balance, setBalance] = React.useState<BalanceData | MimoBalanceData | null>(null);
-  const [balanceState, setBalanceState] = React.useState<BalanceState>("loading");
-  const [balanceError, setBalanceError] = React.useState("");
-  const [usage, setUsage] = React.useState<UsageResult | MimoUsageResult | null>(null);
-  const [usageState, setUsageState] = React.useState<BalanceState>("loading");
-  const [usageError, setUsageError] = React.useState("");
+  const [data, dispatch] = React.useReducer(dataReducer, initialDataState);
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = React.useState(60);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [exchangeRate, setExchangeRate] = React.useState<number>(0.137);
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("currency_per_token");
   const [autoClearOld, setAutoClearOld] = React.useState(true);
+  const [historyMonths, setHistoryMonths] = React.useState(DEFAULT_HISTORY_MONTHS);
+  const [accounts, setAccounts] = React.useState<AccountSummary[]>([]);
+  const [activeAccountId, setActiveAccountId] = React.useState<string | null>(null);
+  const [balanceHistory, setBalanceHistory] = React.useState<BalanceHistoryEntry[]>([]);
 
   const providerRef = React.useRef(provider);
   const fetchingRef = React.useRef<Set<string>>(new Set());
 
+  const { balance, balanceState, balanceError, usage, usageState, usageError } = data;
+
   const loadBalance = React.useCallback((p?: Provider) => {
     const active = p ?? provider;
-    setBalanceState("loading");
+    dispatch({ type: "BALANCE_LOADING" });
     const cmd = active === "deepseek" ? "fetch_balance" : "fetch_mimo_balance";
     void fetchWithCache<BalanceData | MimoBalanceData>(`dsm-balance-${active}`, () => invoke<BalanceData | MimoBalanceData>(cmd))
-      .then((data) => { setBalance(data); setBalanceState("ok"); })
+      .then((data) => {
+        dispatch({ type: "BALANCE_OK", balance: data });
+        // 余额成功更新后刷新走势历史
+        void invoke<BalanceHistoryEntry[]>("get_balance_history").then((h) => setBalanceHistory(Array.isArray(h) ? h : [])).catch(() => {});
+      })
       .catch((error) => {
-        const message = typeof error === "string" ? error : "查询失败";
-        setBalance(null); setBalanceError(message); setBalanceState(message.includes("未配置") ? "nokey" : "error");
+        const message = typeof error === "string" ? error : t("app.error");
+        dispatch({ type: "BALANCE_ERR", error: message });
       });
   }, [provider]);
 
   /** 全量加载：检查缓存，补齐缺失月份，一次性合并 */
   const loadUsage = React.useCallback(async (p?: Provider) => {
     const active = p ?? provider;
-    setUsageState("loading");
-    const months = yearMonths();
+    dispatch({ type: "USAGE_LOADING" });
+    const months = yearMonths(historyMonths);
 
-    if (autoClearOld) clearOldCache(active);
+    if (autoClearOld) clearOldCache(active, historyMonths);
 
     // 每次全量加载时重置防重集合，允许重试之前失败的月份
     fetchingRef.current = new Set();
@@ -167,10 +209,14 @@ function App() {
     }
     const results = await Promise.allSettled(
       missing.map(({ year, month }) =>
-        active === "deepseek"
-          ? invoke<UsageResult>("fetch_usage", { month, year })
-          : invoke<MimoUsageResult>("fetch_mimo_usage", { month, year })
-            .then(data => { setCached(active, year, month, data); return data; })
+        invoke<UsageResult | MimoUsageResult>(
+          active === "deepseek" ? "fetch_usage" : "fetch_mimo_usage",
+          { month, year }
+        ).then((data) => {
+          // 两个平台的查询结果都写回缓存，避免下次启动重复拉取
+          if (data) setCached(active, year, month, data);
+          return data;
+        })
       )
     );
     results.forEach((r, i) => {
@@ -182,7 +228,7 @@ function App() {
     });
 
     if (cached.length === 0) {
-      setUsage(null); setUsageState("error"); setUsageError("暂无用量数据");
+      dispatch({ type: "USAGE_ERR", error: t("usage.no_data") });
       return;
     }
 
@@ -190,23 +236,24 @@ function App() {
       ? mergeDS(cached as UsageResult[])
       : mergeMimo(cached as MimoUsageResult[]);
 
-    setUsage(merged); setUsageState("ok"); setUsageError("");
-  }, [provider, autoClearOld]);
+    dispatch({ type: "USAGE_OK", usage: merged });
+  }, [provider, autoClearOld, historyMonths]);
 
-  /** 强制全量重载：忽略缓存，重取过去 12 个月，与本地比对后覆盖 */
+  /** 强制全量重载：忽略缓存，重取历史范围内全部月份，与本地比对后覆盖 */
   const reloadCache = React.useCallback(async (p?: Provider) => {
     const active = p ?? providerRef.current;
-    setUsageState("loading");
-    const months = yearMonths();
-    if (autoClearOld) clearOldCache(active);
+    dispatch({ type: "USAGE_LOADING" });
+    const months = yearMonths(historyMonths);
+    if (autoClearOld) clearOldCache(active, historyMonths);
 
     const fresh: (UsageResult | MimoUsageResult)[] = [];
     // 并行请求所有月份
     const results = await Promise.allSettled(
       months.map(({ year, month }) =>
-        active === "deepseek"
-          ? invoke<UsageResult>("fetch_usage", { month, year })
-          : invoke<MimoUsageResult>("fetch_mimo_usage", { month, year })
+        invoke<UsageResult | MimoUsageResult>(
+          active === "deepseek" ? "fetch_usage" : "fetch_mimo_usage",
+          { month, year }
+        )
       )
     );
     results.forEach((r, i) => {
@@ -221,15 +268,15 @@ function App() {
     });
 
     if (fresh.length === 0) {
-      setUsageState("error"); setUsageError("暂无用量数据");
+      dispatch({ type: "USAGE_ERR", error: t("usage.no_data") });
       return;
     }
 
     const merged = active === "deepseek"
       ? mergeDS(fresh as UsageResult[])
       : mergeMimo(fresh as MimoUsageResult[]);
-    setUsage(merged); setUsageState("ok"); setUsageError("");
-  }, [autoClearOld]);
+    dispatch({ type: "USAGE_OK", usage: merged });
+  }, [autoClearOld, historyMonths]);
 
   /** 增量刷新：仅更新当前月（当日数据可能变化） */
   const refreshCurrentMonth = React.useCallback(async () => {
@@ -243,7 +290,7 @@ function App() {
         : await invoke<MimoUsageResult>("fetch_mimo_usage", { month, year });
       if (data) setCached(active, year, month, data);
       // 重新合并所有缓存月份
-      const months = yearMonths();
+      const months = yearMonths(historyMonths);
       const all: (UsageResult | MimoUsageResult)[] = [];
       for (const { year: y, month: m } of months) {
         const c = getCached(active, y, m);
@@ -253,12 +300,10 @@ function App() {
         const merged = active === "deepseek"
           ? mergeDS(all as UsageResult[])
           : mergeMimo(all as MimoUsageResult[]);
-        setUsage(merged); setUsageState("ok");
+        dispatch({ type: "USAGE_OK", usage: merged });
       }
     } catch { /* 静默失败 */ }
-  }, []);
-
-  const refreshAll = React.useCallback(() => { loadBalance(); }, [loadBalance]);
+  }, [historyMonths]);
 
   // auto-refresh 只刷新余额和当月用量，不重拉历史
   React.useEffect(() => {
@@ -269,8 +314,7 @@ function App() {
 
   const setProvider = React.useCallback((next: Provider) => {
     setProviderState(next);
-    setBalance(null); setBalanceState("loading");
-    setUsage(null); setUsageState("loading");
+    dispatch({ type: "RESET" });
     if (next === "mimo") void invoke("ensure_mimo_webview").catch(console.warn);
     void invoke<AppConfig>("set_provider", { provider: next }).catch(console.warn);
   }, []);
@@ -286,12 +330,15 @@ function App() {
       .then((config) => {
         if (!initialLoadDone.current) {
           initialLoadDone.current = true;
-          if (config.provider !== providerRef.current) { setBalance(null); setBalanceState("loading"); setUsage(null); setUsageState("loading"); }
+          if (config.provider !== providerRef.current) { dispatch({ type: "RESET" }); }
           providerRef.current = config.defaultProvider || config.provider; setProviderState(config.defaultProvider || config.provider);
           setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60); setAutoRefreshEnabled(config.autoRefreshEnabled);
           setCurrency(config.currency || "cny");
           setEfficiencyUnit(config.efficiencyUnit || "currency_per_token");
           setAutoClearOld(config.autoClearOldCache ?? true);
+          setHistoryMonths(config.usageHistoryMonths || DEFAULT_HISTORY_MONTHS);
+          setAccounts(config.accounts || []);
+          setActiveAccountId(config.activeAccountId || null);
           const cached = localStorage.getItem("dsm-exrate-v2");
           if (cached) {
             try {
@@ -317,13 +364,21 @@ function App() {
   React.useEffect(() => {
     const unlistenPromise = listen("mimo-auth-required", () => {
       if (providerRef.current !== "mimo") return; // 仅在 MiMo 模式下响应
-      setUsageState("error"); setUsageError("MiMo 未登录，请在设置中重新登录小米账号");
-      setBalanceState("error"); setBalanceError("MiMo 未登录");
+      dispatch({ type: "USAGE_ERR", error: t("mimo.not_logged_in") });
+      dispatch({ type: "BALANCE_ERR", error: t("mimo.not_logged_in_short") });
     });
     return () => { void unlistenPromise.then((unlisten) => unlisten()); };
   }, []);
 
   const hideWindow = React.useCallback(() => { void invoke("hide_main_window").catch(() => {}); }, []);
+
+  const handleAccountsChanged = React.useCallback((nextAccounts: AccountSummary[], nextActiveId: string | null) => {
+    setAccounts(nextAccounts);
+    setActiveAccountId(nextActiveId);
+    // 切换账户后立即刷新余额与用量（缓存 key 不含账户，强制重载覆盖）
+    loadBalance();
+    void reloadCache();
+  }, [loadBalance, reloadCache]);
 
   return (
     <div className="stage">
@@ -338,17 +393,23 @@ function App() {
           currency={currency}
           exchangeRate={exchangeRate}
           efficiencyUnit={efficiencyUnit}
+          balanceHistory={balanceHistory}
         />
       )}
       {view === "settings" && (
         <SettingsPanel
           provider={provider} onProviderChange={setProvider} onBack={() => setView("dashboard")}
-          onUsageLoaded={(nextUsage) => { setUsage(nextUsage); setUsageState("ok"); }}
-          onUsageCleared={() => { setUsage(null); setUsageState("loading"); }}
+          onUsageLoaded={(nextUsage) => { dispatch({ type: "USAGE_OK", usage: nextUsage }); }}
+          onUsageCleared={() => { dispatch({ type: "USAGE_LOADING" }); }}
           onRefreshIntervalChanged={setRefreshIntervalSeconds} onAutoRefreshChanged={setAutoRefreshEnabled}
           onCurrencyChanged={setCurrency}
           onEfficiencyUnitChanged={setEfficiencyUnit}
           onReloadCache={reloadCache}
+          accounts={accounts}
+          activeAccountId={activeAccountId}
+          onAccountsChanged={handleAccountsChanged}
+          historyMonths={historyMonths}
+          onHistoryMonthsChanged={(n) => { setHistoryMonths(n); void reloadCache(); }}
         />
       )}
       {view === "detail" && (
@@ -360,4 +421,9 @@ function App() {
 
 
 // ─── Mount ─────────────────────────────────────────────────
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<React.StrictMode><App /></React.StrictMode>);
+const rootEl = document.getElementById("root");
+if (rootEl) {
+  ReactDOM.createRoot(rootEl).render(<React.StrictMode><App /></React.StrictMode>);
+}
+
+export default App;
