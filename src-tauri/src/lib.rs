@@ -7,8 +7,8 @@ mod modules;
 use modules::{
     config, deepseek, mimo, tray,
     types::{
-        AppConfig, BalanceHistoryEntry, BalanceResult, CallbackServerPort, MimoBalanceResult,
-        MimoDetailCache, MimoUsageResult, UsageResult,
+        AppConfig, BalanceResult, CallbackServerPort, MimoBalanceResult, MimoDetailCache,
+        MimoUsageResult, UsageResult,
     },
 };
 
@@ -273,66 +273,6 @@ fn save_history_months(months: u32) -> Result<AppConfig, String> {
     Ok(config::to_app_config(config)?)
 }
 
-// ─── 多账户管理 ──────────────────────────────────────────
-
-#[tauri::command]
-fn add_account(name: String) -> Result<AppConfig, String> {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err("账户名称不能为空".to_string());
-    }
-    if name.len() > 40 {
-        return Err("账户名称过长（最多 40 字符）".to_string());
-    }
-    let mut config = config::read_stored_config()?;
-    let id = format!(
-        "acc_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    config.accounts.push(modules::types::AccountConfig {
-        id: id.clone(),
-        name,
-        api_key: None,
-        usage_token: None,
-    });
-    config.active_account = Some(id);
-    config::write_stored_config(&config)?;
-    Ok(config::to_app_config(config)?)
-}
-
-#[tauri::command]
-fn switch_account(id: String) -> Result<AppConfig, String> {
-    let mut config = config::read_stored_config()?;
-    if !config.accounts.iter().any(|a| a.id == id) {
-        return Err("账户不存在".to_string());
-    }
-    config.active_account = Some(id);
-    config::write_stored_config(&config)?;
-    Ok(config::to_app_config(config)?)
-}
-
-#[tauri::command]
-fn delete_account(id: String) -> Result<AppConfig, String> {
-    let mut config = config::read_stored_config()?;
-    if !config.accounts.iter().any(|a| a.id == id) {
-        return Err("账户不存在".to_string());
-    }
-    config.accounts.retain(|a| a.id != id);
-    if config.active_account.as_deref() == Some(id.as_str()) {
-        config.active_account = config.accounts.first().map(|a| a.id.clone());
-    }
-    config::write_stored_config(&config)?;
-    Ok(config::to_app_config(config)?)
-}
-
-#[tauri::command]
-fn get_balance_history() -> Result<Vec<BalanceHistoryEntry>, String> {
-    Ok(config::read_stored_config()?.balance_history)
-}
-
 #[tauri::command]
 fn export_config_json() -> Result<String, String> {
     let config = config::read_stored_config()?;
@@ -387,7 +327,6 @@ fn set_provider(provider: String) -> Result<AppConfig, String> {
 #[tauri::command]
 async fn fetch_balance() -> Result<BalanceResult, String> {
     let result = deepseek::do_fetch_balance().await?;
-    config::record_balance_history("deepseek", &result.total_balance, &result.currency);
     notify_low_balance_if_needed(&result.total_balance, &result.currency);
     Ok(result)
 }
@@ -425,11 +364,6 @@ async fn fetch_usage(month: u32, year: u32) -> Result<UsageResult, String> {
 #[tauri::command]
 async fn fetch_mimo_balance(app: tauri::AppHandle) -> Result<MimoBalanceResult, String> {
     let result = mimo::do_fetch_mimo_balance(&app).await?;
-    config::record_balance_history(
-        "mimo",
-        &result.available_balance,
-        &result.currency,
-    );
     notify_low_balance_if_needed(&result.available_balance, &result.currency);
     Ok(result)
 }
@@ -447,6 +381,7 @@ async fn fetch_mimo_usage(
 async fn start_mimo_sync(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(mimo::do_start_mimo_sync(&app)?)
 }
+
 
 #[tauri::command]
 async fn ensure_mimo_webview(app: tauri::AppHandle) -> Result<(), String> {
@@ -567,10 +502,6 @@ pub fn run() {
             save_always_on_top,
             save_auto_clear_old_cache,
             save_history_months,
-            add_account,
-            switch_account,
-            delete_account,
-            get_balance_history,
             set_provider,
             fetch_balance,
             save_usage_token,

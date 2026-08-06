@@ -4,9 +4,7 @@
 
 use std::{fs, path::PathBuf};
 
-use crate::modules::types::{
-    AccountConfig, AccountSummary, AppConfig, AppError, BalanceHistoryEntry,
-};
+use crate::modules::types::{AppConfig, AppError};
 pub use crate::modules::types::StoredConfig;
 
 // ─── DPAPI 加密 ──────────────────────────────────────────
@@ -250,8 +248,6 @@ mod tests {
         assert!(!app.usage_token_configured);
         assert!(!app.mimo_token_configured);
         assert_eq!(app.provider, "deepseek");
-        assert!(app.accounts.is_empty());
-        assert!(app.active_account_id.is_none());
         assert_eq!(app.usage_history_months, 12);
     }
 
@@ -296,128 +292,15 @@ mod tests {
         assert!(!app.api_key_configured);
         assert!(!app.low_balance_notify);
     }
-
-    #[test]
-    fn migrate_legacy_credentials_into_account() {
-        let mut config = StoredConfig {
-            api_key: Some("sk-legacy-key".to_string()),
-            usage_token: Some("legacy-token".to_string()),
-            ..Default::default()
-        };
-        migrate_legacy_account(&mut config);
-        assert_eq!(config.accounts.len(), 1);
-        assert_eq!(config.accounts[0].api_key.as_deref(), Some("sk-legacy-key"));
-        assert_eq!(config.accounts[0].usage_token.as_deref(), Some("legacy-token"));
-        assert_eq!(config.accounts[0].name, "默认账户");
-        assert!(config.active_account.is_some());
-    }
-
-    #[test]
-    fn migrate_skips_when_accounts_exist() {
-        let mut config = StoredConfig {
-            api_key: Some("sk-legacy-key".to_string()),
-            accounts: vec![AccountConfig {
-                id: "acc_1".into(),
-                name: "已有账户".into(),
-                api_key: Some("sk-new".into()),
-                usage_token: None,
-            }],
-            ..Default::default()
-        };
-        migrate_legacy_account(&mut config);
-        assert_eq!(config.accounts.len(), 1);
-        assert_eq!(config.accounts[0].id, "acc_1");
-    }
-
-    #[test]
-    fn migrate_skips_when_no_credentials() {
-        let mut config = StoredConfig::default();
-        migrate_legacy_account(&mut config);
-        assert!(config.accounts.is_empty());
-    }
-
-    #[test]
-    fn today_iso_format() {
-        let d = today_iso();
-        assert!(d.len() == 10, "expected YYYY-MM-DD, got {d}");
-        assert!(d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-'));
-        let parts: Vec<&str> = d.split('-').collect();
-        assert_eq!(parts.len(), 3);
-        assert!(parts[0].parse::<u32>().is_ok());
-        assert!((1..=12).contains(&parts[1].parse::<u32>().unwrap()));
-        assert!((1..=31).contains(&parts[2].parse::<u32>().unwrap()));
-    }
-
-    #[test]
-    fn record_history_dedupes_same_day() {
-        let mut config = StoredConfig::default();
-        record_balance_history_into(&mut config, "deepseek", "10.5", "CNY");
-        record_balance_history_into(&mut config, "deepseek", "9.5", "CNY");
-        assert_eq!(config.balance_history.len(), 1);
-        assert_eq!(config.balance_history[0].balance, 9.5);
-    }
-
-    #[test]
-    fn record_history_ignores_non_numeric() {
-        let mut config = StoredConfig::default();
-        record_balance_history_into(&mut config, "mimo", "—", "CNY");
-        assert!(config.balance_history.is_empty());
-    }
-
-    #[test]
-    fn record_history_caps_at_180_days() {
-        let mut config = StoredConfig::default();
-        for i in 0..200 {
-            config.balance_history.push(BalanceHistoryEntry {
-                provider: "deepseek".into(),
-                date: format!("2026-01-{:02}", (i % 28) + 1),
-                balance: i as f64,
-                currency: "CNY".into(),
-            });
-        }
-        trim_balance_history(&mut config);
-        assert_eq!(config.balance_history.len(), 180);
-    }
-
-    #[test]
-    fn active_credentials_prefer_account() {
-        let config = StoredConfig {
-            api_key: Some("legacy".into()),
-            active_account: Some("acc_1".into()),
-            accounts: vec![AccountConfig {
-                id: "acc_1".into(),
-                name: "A".into(),
-                api_key: Some("account-key".into()),
-                usage_token: Some("account-token".into()),
-            }],
-            ..Default::default()
-        };
-        assert_eq!(active_api_key(&config), Some("account-key"));
-        assert_eq!(active_usage_token(&config), Some("account-token"));
-    }
-
-    #[test]
-    fn active_credentials_fallback_to_legacy() {
-        let config = StoredConfig {
-            api_key: Some("legacy-key".into()),
-            usage_token: Some("legacy-token".into()),
-            active_account: None,
-            ..Default::default()
-        };
-        assert_eq!(active_api_key(&config), Some("legacy-key"));
-        assert_eq!(active_usage_token(&config), Some("legacy-token"));
-    }
 }
 
 pub fn read_stored_config() -> Result<StoredConfig, AppError> {
     let path = config_path()?;
     if !path.exists() {
-        let mut config = StoredConfig {
+        return Ok(StoredConfig {
             refresh_interval_seconds: 60,
             ..StoredConfig::default()
-        };
-        migrate_legacy_account(&mut config);
-        return Ok(config);
+        });
     }
 
     let text = fs::read_to_string(&path).map_err(|error| AppError::Io(error.to_string()))?;
@@ -438,32 +321,7 @@ pub fn read_stored_config() -> Result<StoredConfig, AppError> {
     if let Some(ref ph) = config.mimo_ph {
         config.mimo_ph = Some(decrypt_credential(ph)?);
     }
-    if let Some(ref id) = config.active_account {
-        if let Some(acc) = config.accounts.iter_mut().find(|a| &a.id == id) {
-            acc.api_key = acc.api_key.as_ref().map(|k| decrypt_credential(k)).transpose()?;
-            acc.usage_token = acc
-                .usage_token
-                .as_ref()
-                .map(|k| decrypt_credential(k))
-                .transpose()?;
-        }
-    }
-    // 旧版本凭据迁移到账户体系（仅内存态，下次保存时落盘）
-    migrate_legacy_account(&mut config);
     Ok(config)
-}
-
-/// 旧配置（只有 api_key/usage_token 顶层字段）迁移为默认账户
-fn migrate_legacy_account(config: &mut StoredConfig) {
-    if config.accounts.is_empty() && (config.api_key.is_some() || config.usage_token.is_some()) {
-        config.accounts.push(AccountConfig {
-            id: "default".to_string(),
-            name: "默认账户".to_string(),
-            api_key: config.api_key.clone(),
-            usage_token: config.usage_token.clone(),
-        });
-        config.active_account = Some("default".to_string());
-    }
 }
 
 pub fn write_stored_config(config: &StoredConfig) -> Result<(), AppError> {
@@ -486,15 +344,6 @@ pub fn write_stored_config(config: &StoredConfig) -> Result<(), AppError> {
     if let Some(ref ph) = config.mimo_ph {
         encrypted_config.mimo_ph = Some(encrypt_credential(ph)?);
     }
-    for acc in &mut encrypted_config.accounts {
-        if let Some(ref key) = acc.api_key {
-            acc.api_key = Some(encrypt_credential(key)?);
-        }
-        if let Some(ref token) = acc.usage_token {
-            acc.usage_token = Some(encrypt_credential(token)?);
-        }
-    }
-
     let text =
         serde_json::to_string_pretty(&encrypted_config).map_err(|error| AppError::Parse(error.to_string()))?;
     fs::write(path, text).map_err(|error| AppError::Io(error.to_string()))
@@ -540,21 +389,6 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, AppError> {
         .filter(|t| !t.is_empty())
         .is_some();
 
-    let accounts: Vec<AccountSummary> = config
-        .accounts
-        .iter()
-        .map(|a| AccountSummary {
-            id: a.id.clone(),
-            name: a.name.clone(),
-            api_key_configured: a.api_key.as_ref().filter(|k| !k.is_empty()).is_some(),
-            usage_token_configured: a
-                .usage_token
-                .as_ref()
-                .filter(|t| !t.is_empty())
-                .is_some(),
-        })
-        .collect();
-
     Ok(AppConfig {
         api_key_configured: api_key_preview.is_some(),
         api_key_preview,
@@ -580,104 +414,7 @@ pub fn to_app_config(config: StoredConfig) -> Result<AppConfig, AppError> {
         } else {
             config.usage_history_months
         },
-        accounts,
-        active_account_id: config.active_account,
     })
-}
-
-// ─── 账户凭据 ────────────────────────────────────────────
-
-/// 当前活跃账户的 API Key（无活跃账户或账户无 Key 时回退到旧顶层字段）
-pub fn active_api_key(config: &StoredConfig) -> Option<&str> {
-    config
-        .active_account
-        .as_ref()
-        .and_then(|id| config.accounts.iter().find(|a| &a.id == id))
-        .and_then(|a| a.api_key.as_deref())
-        .filter(|v| !v.is_empty())
-        .or_else(|| config.api_key.as_deref().filter(|v| !v.is_empty()))
-}
-
-/// 当前活跃账户的用量 Token（回退到旧顶层字段）
-pub fn active_usage_token(config: &StoredConfig) -> Option<&str> {
-    config
-        .active_account
-        .as_ref()
-        .and_then(|id| config.accounts.iter().find(|a| &a.id == id))
-        .and_then(|a| a.usage_token.as_deref())
-        .filter(|v| !v.is_empty())
-        .or_else(|| config.usage_token.as_deref().filter(|v| !v.is_empty()))
-}
-
-// ─── 余额历史 ────────────────────────────────────────────
-
-/// 本地日期（UTC+8，Asia/Shanghai），Hinnant civil_from_days 算法
-pub fn today_iso() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    // UTC+8
-    let days = (secs + 8 * 3600).div_euclid(86400) + 719468;
-    let era = days.div_euclid(146097);
-    let doe = days.rem_euclid(146097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-const BALANCE_HISTORY_KEEP_DAYS: usize = 180;
-
-fn record_balance_history_into(
-    config: &mut StoredConfig,
-    provider: &str,
-    balance_str: &str,
-    currency: &str,
-) {
-    let Ok(balance) = balance_str.parse::<f64>() else {
-        return; // 非数值余额（如 "—"）不记录
-    };
-    if !balance.is_finite() {
-        return;
-    }
-    let today = today_iso();
-    // 同平台同日去重（保留最新值）
-    config.balance_history.retain(|e| !(e.provider == provider && e.date == today));
-    config.balance_history.push(BalanceHistoryEntry {
-        provider: provider.to_string(),
-        date: today,
-        balance,
-        currency: currency.to_string(),
-    });
-    trim_balance_history(config);
-}
-
-fn trim_balance_history(config: &mut StoredConfig) {
-    if config.balance_history.len() > BALANCE_HISTORY_KEEP_DAYS {
-        config.balance_history = config
-            .balance_history
-            .split_off(config.balance_history.len() - BALANCE_HISTORY_KEEP_DAYS);
-    }
-}
-
-/// 记录一次余额快照（fetch 成功后调用），失败静默（不阻塞查询）
-pub fn record_balance_history(provider: &str, balance_str: &str, currency: &str) {
-    let mut config = match read_stored_config() {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("[BalanceHistory] 读取配置失败，跳过记录: {}", e);
-            return;
-        }
-    };
-    record_balance_history_into(&mut config, provider, balance_str, currency);
-    if let Err(e) = write_stored_config(&config) {
-        log::warn!("[BalanceHistory] 保存配置失败: {}", e);
-    }
 }
 
 // ─── 开机自启 ────────────────────────────────────────────

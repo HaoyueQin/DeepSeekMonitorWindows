@@ -161,9 +161,9 @@ MiMo 没有公开 API Key，使用**隐藏 WebView2** 窗口（`mimo-sync`）登
 ### 7.1 功能增强（已全部完成）
 - [x] MiMo 支持更早历史月份 → 设置→数据「历史数据深度」（12/24/36 个月，config.usage_history_months）
 - [x] 用量数据导出支持日期范围筛选 → 设置→数据 导出区「日期范围」起止月份，CSV 按日期行展开
-- [x] 图表支持柱状图/折线图切换 → UsageChart 右上角模式切换（bar/line，SVG 三线）
-- [x] 余额走势图 → 后端 balance_history（每日快照去重、保留 180 天、新命令 get_balance_history）+ 前端 BalanceHistoryCard（7/30/90 天）
-- [x] 多账户切换 → config.accounts/active_account（DPAPI 加密、旧凭据自动迁移为「默认账户」），新命令 add_account/switch_account/delete_account
+- [x] ~~图表支持柱状图/折线图切换~~ → **不做**（2026-08-06 用户确认不在需求内，已移除）
+- [x] ~~余额走势图~~ → **不做**（2026-08-06 用户确认不在需求内，已移除）
+- [x] ~~多账户切换~~ → **不做**（2026-08-06 用户确认不在需求内，已移除）
 
 ### 7.3 技术债务（已全部完成）
 - [x] `mergeDS` / `mergeMimo` 清理 → grep 确认 modelMap 无残留（已自然完成）

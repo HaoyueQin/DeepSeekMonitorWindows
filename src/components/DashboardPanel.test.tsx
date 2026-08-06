@@ -43,7 +43,6 @@ const defaultProps = {
   currency: "cny" as const,
   exchangeRate: 0.137,
   efficiencyUnit: "currency_per_token" as const,
-  balanceHistory: [],
 };
 
 describe("DashboardPanel", () => {
@@ -59,9 +58,6 @@ describe("DashboardPanel", () => {
     expect(screen.getByText("V4 Flash")).toBeInTheDocument();
     expect(screen.getByText("V4 Pro")).toBeInTheDocument();
     expect(screen.getByText("缓存命中明细")).toBeInTheDocument();
-    // 余额走势卡片（无历史数据时显示占位）
-    expect(screen.getByText("余额走势")).toBeInTheDocument();
-    expect(screen.getByText("暂无余额历史数据")).toBeInTheDocument();
   });
 
   it("renders loading states", () => {
@@ -107,23 +103,4 @@ describe("DashboardPanel", () => {
     expect(defaultProps.onProviderChange).toHaveBeenCalledWith("mimo");
   });
 
-  it("shows balance history chart when history exists", () => {
-    const today = new Date();
-    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const d1 = new Date(today); d1.setDate(today.getDate() - 2);
-    const d2 = new Date(today); d2.setDate(today.getDate() - 1);
-    render(
-      <DashboardPanel
-        {...defaultProps}
-        balanceHistory={[
-          { provider: "deepseek", date: iso(d1), balance: 100, currency: "CNY" },
-          { provider: "deepseek", date: iso(d2), balance: 99, currency: "CNY" },
-          { provider: "deepseek", date: iso(today), balance: 98.5, currency: "CNY" },
-        ]}
-      />
-    );
-    // 走势图 SVG 渲染（无占位文本）
-    expect(document.querySelector(".balance-history-svg")).not.toBeNull();
-    expect(screen.queryByText("暂无余额历史数据")).not.toBeInTheDocument();
-  });
 });

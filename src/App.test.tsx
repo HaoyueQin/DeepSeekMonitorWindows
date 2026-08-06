@@ -34,8 +34,6 @@ const config: AppConfig = {
   alwaysOnTop: false,
   autoClearOldCache: true,
   usageHistoryMonths: 12,
-  accounts: [{ id: "default", name: "默认账户", apiKeyConfigured: true, usageTokenConfigured: true }],
-  activeAccountId: "default",
 };
 
 const balance: BalanceData = {

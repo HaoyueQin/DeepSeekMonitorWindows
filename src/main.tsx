@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import "./styles.css";
 
-import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, AccountSummary, BalanceHistoryEntry } from "./types";
+import type { ViewName, ModelName, Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "./types";
 import { fetchWithCache } from "./utils";
 import { initLang, t } from "./i18n";
 import { DashboardPanel } from "./components/DashboardPanel";
@@ -154,9 +154,6 @@ function App() {
   const [efficiencyUnit, setEfficiencyUnit] = React.useState<"token_per_currency" | "currency_per_token">("currency_per_token");
   const [autoClearOld, setAutoClearOld] = React.useState(true);
   const [historyMonths, setHistoryMonths] = React.useState(DEFAULT_HISTORY_MONTHS);
-  const [accounts, setAccounts] = React.useState<AccountSummary[]>([]);
-  const [activeAccountId, setActiveAccountId] = React.useState<string | null>(null);
-  const [balanceHistory, setBalanceHistory] = React.useState<BalanceHistoryEntry[]>([]);
 
   const providerRef = React.useRef(provider);
   const fetchingRef = React.useRef<Set<string>>(new Set());
@@ -170,8 +167,6 @@ function App() {
     void fetchWithCache<BalanceData | MimoBalanceData>(`dsm-balance-${active}`, () => invoke<BalanceData | MimoBalanceData>(cmd))
       .then((data) => {
         dispatch({ type: "BALANCE_OK", balance: data });
-        // 余额成功更新后刷新走势历史
-        void invoke<BalanceHistoryEntry[]>("get_balance_history").then((h) => setBalanceHistory(Array.isArray(h) ? h : [])).catch(() => {});
       })
       .catch((error) => {
         const message = typeof error === "string" ? error : t("app.error");
@@ -337,8 +332,6 @@ function App() {
           setEfficiencyUnit(config.efficiencyUnit || "currency_per_token");
           setAutoClearOld(config.autoClearOldCache ?? true);
           setHistoryMonths(config.usageHistoryMonths || DEFAULT_HISTORY_MONTHS);
-          setAccounts(config.accounts || []);
-          setActiveAccountId(config.activeAccountId || null);
           const cached = localStorage.getItem("dsm-exrate-v2");
           if (cached) {
             try {
@@ -372,14 +365,6 @@ function App() {
 
   const hideWindow = React.useCallback(() => { void invoke("hide_main_window").catch(() => {}); }, []);
 
-  const handleAccountsChanged = React.useCallback((nextAccounts: AccountSummary[], nextActiveId: string | null) => {
-    setAccounts(nextAccounts);
-    setActiveAccountId(nextActiveId);
-    // 切换账户后立即刷新余额与用量（缓存 key 不含账户，强制重载覆盖）
-    loadBalance();
-    void reloadCache();
-  }, [loadBalance, reloadCache]);
-
   return (
     <div className="stage">
       {view === "dashboard" && (
@@ -393,7 +378,6 @@ function App() {
           currency={currency}
           exchangeRate={exchangeRate}
           efficiencyUnit={efficiencyUnit}
-          balanceHistory={balanceHistory}
         />
       )}
       {view === "settings" && (
@@ -405,9 +389,6 @@ function App() {
           onCurrencyChanged={setCurrency}
           onEfficiencyUnitChanged={setEfficiencyUnit}
           onReloadCache={reloadCache}
-          accounts={accounts}
-          activeAccountId={activeAccountId}
-          onAccountsChanged={handleAccountsChanged}
           historyMonths={historyMonths}
           onHistoryMonthsChanged={(n) => { setHistoryMonths(n); void reloadCache(); }}
         />

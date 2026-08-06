@@ -29,11 +29,7 @@ const translations: Record<string, Record<Lang, string>> = {
   'balance.insufficient': { zh: '余额不足', en: 'Insufficient' },
   'balance.today': { zh: '当日消耗', en: 'Today' },
   'balance.monthly': { zh: '本月消费', en: 'This Month' },
-  'balance.history': { zh: '余额走势', en: 'Balance Trend' },
-  'balance.history_empty': { zh: '暂无余额历史数据', en: 'No balance history yet' },
-  'balance.history_7d': { zh: '7 天', en: '7D' },
-  'balance.history_30d': { zh: '30 天', en: '30D' },
-  'balance.history_90d': { zh: '90 天', en: '90D' },
+  'balance.total_cost': { zh: '累计消费', en: 'Total Cost' },
 
   // 用量行
   'usage.cache_hit': { zh: '缓存命中', en: 'Cache hit' },
@@ -161,18 +157,6 @@ const translations: Record<string, Record<Lang, string>> = {
   'settings.efficiency_way': { zh: '效率指标显示方式：', en: 'Efficiency metric display:' },
   'settings.choose_theme': { zh: '选择应用的外观主题。', en: 'Choose app appearance theme.' },
 
-  // 账户管理
-  'settings.accounts_title': { zh: '账户管理', en: 'Accounts' },
-  'settings.accounts_desc': { zh: '管理多个 DeepSeek API 账户。切换账户后，余额和用量按当前账户查询。', en: 'Manage multiple DeepSeek API accounts. Balance and usage are queried per active account.' },
-  'settings.account_name': { zh: '账户名称', en: 'Account name' },
-  'settings.account_name_ph': { zh: '如：工作账户', en: 'e.g. Work account' },
-  'settings.add_account': { zh: '添加账户', en: 'Add account' },
-  'settings.delete_account': { zh: '删除', en: 'Delete' },
-  'settings.switch_account': { zh: '切换', en: 'Switch' },
-  'settings.active': { zh: '当前', en: 'Active' },
-  'settings.default_account': { zh: '默认账户', en: 'Default account' },
-  'settings.delete_fail': { zh: '删除失败', en: 'Delete failed' },
-  'settings.add_fail': { zh: '添加失败', en: 'Add failed' },
 
   // 通知
   'notify.title': { zh: '通知', en: 'Notifications' },
@@ -217,6 +201,7 @@ const translations: Record<string, Record<Lang, string>> = {
   'mimo.login_hint': { zh: '请在打开的窗口中登录小米账号，登录后保持窗口打开', en: 'Login to Xiaomi in the opened window and keep it open' },
   'mimo.sync_fail': { zh: '启动同步失败', en: 'Failed to start sync' },
 
+
   // 图表
   'chart.cache_hit': { zh: '缓存命中明细', en: 'Cache Hit Details' },
   'chart.hit': { zh: '命中', en: 'Hit' },
@@ -232,8 +217,6 @@ const translations: Record<string, Record<Lang, string>> = {
   'chart.avg_price': { zh: '平均单价', en: 'Avg. price' },
   'chart.prev_week': { zh: '上一周', en: 'Previous week' },
   'chart.next_week': { zh: '下一周', en: 'Next week' },
-  'chart.bar': { zh: '柱状图', en: 'Bar' },
-  'chart.line': { zh: '折线图', en: 'Line' },
 
   // 模型详情
   'detail.requests': { zh: 'API 请求次数', en: 'API Requests' },

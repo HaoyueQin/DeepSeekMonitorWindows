@@ -22,9 +22,7 @@ use tauri::webview::PageLoadEvent;
 use crate::modules::types::{
     AppError, AppConfig, BalanceResult, UsageDaySummary, UsageModelSummary, UsageResult,
 };
-use crate::modules::config::{
-    active_api_key, active_usage_token, read_stored_config, to_app_config, write_stored_config,
-};
+use crate::modules::config::{read_stored_config, to_app_config, write_stored_config};
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
 const REQUEST_TIMEOUT_SECS: u64 = 15;
@@ -33,7 +31,10 @@ const REQUEST_TIMEOUT_SECS: u64 = 15;
 
 pub async fn do_fetch_balance() -> Result<BalanceResult, AppError> {
     let config = read_stored_config()?;
-    let api_key = active_api_key(&config).ok_or(AppError::NoApiKey)?;
+    let api_key = config
+        .api_key
+        .filter(|value| !value.is_empty())
+        .ok_or(AppError::NoApiKey)?;
 
     let client = reqwest::Client::new();
     let response = client
@@ -95,66 +96,32 @@ pub fn do_save_usage_token(usage_token: String) -> Result<AppConfig, AppError> {
         return Err("用量 Token 不能为空".into());
     }
     let mut config = read_stored_config()?;
-    if let Some(id) = config.active_account.clone() {
-        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
-            acc.usage_token = Some(value.clone());
-        } else {
-            config.usage_token = Some(value);
-        }
-    } else {
-        config.usage_token = Some(value);
-    }
+    config.usage_token = Some(value);
     write_stored_config(&config)?;
     to_app_config(config)
 }
 
 pub fn do_clear_usage_token() -> Result<AppConfig, AppError> {
     let mut config = read_stored_config()?;
-    if let Some(id) = config.active_account.clone() {
-        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
-            acc.usage_token = None;
-        } else {
-            config.usage_token = None;
-        }
-    } else {
-        config.usage_token = None;
-    }
+    config.usage_token = None;
     write_stored_config(&config)?;
     to_app_config(config)
 }
 
-/// 保存 API Key 到当前活跃账户（由 lib.rs save_api_key 使用）
 pub fn do_save_api_key(api_key: String) -> Result<AppConfig, AppError> {
     let value = api_key.trim().to_string();
     if value.is_empty() {
         return Err("API Key 不能为空".into());
     }
     let mut config = read_stored_config()?;
-    if let Some(id) = config.active_account.clone() {
-        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
-            acc.api_key = Some(value.clone());
-        } else {
-            config.api_key = Some(value);
-        }
-    } else {
-        config.api_key = Some(value);
-    }
+    config.api_key = Some(value);
     write_stored_config(&config)?;
     to_app_config(config)
 }
 
-/// 清除当前活跃账户的 API Key（由 lib.rs clear_api_key 使用）
 pub fn do_clear_api_key() -> Result<AppConfig, AppError> {
     let mut config = read_stored_config()?;
-    if let Some(id) = config.active_account.clone() {
-        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
-            acc.api_key = None;
-        } else {
-            config.api_key = None;
-        }
-    } else {
-        config.api_key = None;
-    }
+    config.api_key = None;
     write_stored_config(&config)?;
     to_app_config(config)
 }
@@ -167,16 +134,7 @@ pub fn capture_usage_token(app: &tauri::AppHandle, token: String) -> Result<AppC
         return Err("用量 Token 为空".into());
     }
     let mut config = read_stored_config()?;
-    // 网页登录同步的 Token 写入当前活跃账户
-    if let Some(id) = config.active_account.clone() {
-        if let Some(acc) = config.accounts.iter_mut().find(|a| a.id == id) {
-            acc.usage_token = Some(value.clone());
-        } else {
-            config.usage_token = Some(value);
-        }
-    } else {
-        config.usage_token = Some(value);
-    }
+    config.usage_token = Some(value);
     write_stored_config(&config)?;
     let app_config = to_app_config(config)?;
 
@@ -507,7 +465,11 @@ struct CostResp {
 
 pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, AppError> {
     let config = read_stored_config()?;
-    let token = active_usage_token(&config).ok_or(AppError::NoUsageToken)?;
+    let token = config
+        .usage_token
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or(AppError::NoUsageToken)?;
 
     async fn get_json<T: serde::de::DeserializeOwned>(
         client: &reqwest::Client,

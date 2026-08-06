@@ -7,22 +7,19 @@ import {
   BarChart3, CheckCircle2, Info, KeyRound, Power, Settings, X,
   User, Monitor, Bell, Palette, Globe, ChevronRight,
 } from "lucide-react";
-import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, AccountSummary } from "../types";
+import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
 import { fmtMoney, addDays, previousMonth } from "../utils";
 import { t, tpl, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
 
 // ─── SettingsPanel ─────────────────────────────────────────
-export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged, onReloadCache, accounts, activeAccountId, onAccountsChanged, historyMonths, onHistoryMonthsChanged }: {
+export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged, onReloadCache, historyMonths, onHistoryMonthsChanged }: {
   provider: Provider; onProviderChange: (p: Provider) => void; onBack: () => void;
   onUsageLoaded: (usage: UsageResult | MimoUsageResult) => void; onUsageCleared: () => void;
   onRefreshIntervalChanged: (seconds: number) => void; onAutoRefreshChanged: (enabled: boolean) => void;
   onCurrencyChanged: (currency: "cny" | "usd") => void;
   onEfficiencyUnitChanged: (unit: "token_per_currency" | "currency_per_token") => void;
   onReloadCache?: (p?: Provider) => void;
-  accounts: AccountSummary[];
-  activeAccountId: string | null;
-  onAccountsChanged: (accounts: AccountSummary[], activeId: string | null) => void;
   historyMonths: number;
   onHistoryMonthsChanged: (months: number) => void;
 }) {
@@ -63,7 +60,6 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   const [autoClearOldCache, setAutoClearOldCache] = React.useState(true);
   const [reloading, setReloading] = React.useState(false);
   const [cacheMsg, setCacheMsg] = React.useState("");
-  const [newAccountName, setNewAccountName] = React.useState("");
   const configPath = config?.configPath ?? "%APPDATA%\\DeepSeekMonitorWindows\\config.json";
 
   const PRESET_REFRESH = [60, 300, 1800, 3600];
@@ -114,12 +110,12 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   React.useEffect(() => { const p = listen("mimo-sync-started", () => { setMimoStatus(t("mimo.login_hint")); }); return () => { void p.then((u) => u()); }; }, []);
 
   const pasteApiKey = React.useCallback(async () => { try { setApiKey((await navigator.clipboard.readText()).trim()); setStatus(t("settings.clipboard_read")); } catch { setStatus(t("settings.clipboard_fail")); } }, []);
-  const saveApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_api_key", { apiKey }).then((c) => { setConfig(c); setApiKey(""); setAccountsState(c); setStatus(t("settings.saving_key")); return invoke<BalanceData>("fetch_balance"); }).then((b) => { setStatus(`${t("settings.verify_ok")} ${b.currency === "USD" ? "$" : "¥"}${b.totalBalance}${b.isAvailable ? "" : t("settings.balance_low_suffix")}`); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.save_verify_fail")); }).finally(() => setBusy(false)); }, [apiKey]);
-  const clearApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_api_key").then((c) => { setConfig(c); setApiKey(""); setAccountsState(c); setStatus(t("settings.cleared_key")); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, []);
+  const saveApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_api_key", { apiKey }).then((c) => { setConfig(c); setApiKey(""); setStatus(t("settings.saving_key")); return invoke<BalanceData>("fetch_balance"); }).then((b) => { setStatus(`${t("settings.verify_ok")} ${b.currency === "USD" ? "$" : "¥"}${b.totalBalance}${b.isAvailable ? "" : t("settings.balance_low_suffix")}`); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.save_verify_fail")); }).finally(() => setBusy(false)); }, [apiKey]);
+  const clearApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_api_key").then((c) => { setConfig(c); setApiKey(""); setStatus(t("settings.cleared_key")); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, []);
   const pasteUsageToken = React.useCallback(async () => { try { setUsageToken((await navigator.clipboard.readText()).trim()); setUsageStatus(t("settings.clipboard_read")); } catch { setUsageStatus(t("settings.clipboard_fail")); } }, []);
   const startUsageSync = React.useCallback(() => { setUsageSyncing(true); setUsageStatus(t("usage.opening_login")); void invoke<boolean>("start_usage_sync").then((s) => { if (!s) setUsageStatus(t("usage.reopen_hint")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.open_fail")); }).finally(() => { window.setTimeout(() => setUsageSyncing(false), 2500); }); }, []);
-  const saveUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_usage_token", { usageToken }).then((c) => { setConfig(c); setUsageToken(""); setAccountsState(c); setUsageStatus(t("usage.saving_token")); return refreshUsageAfterToken(t("usage.manual_saved")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.save_fail")); }).finally(() => setBusy(false)); }, [refreshUsageAfterToken, usageToken]);
-  const clearUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_usage_token").then((c) => { setConfig(c); setUsageToken(""); setAccountsState(c); setUsageStatus(t("usage.cleared_token")); onUsageCleared(); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, [onUsageCleared]);
+  const saveUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_usage_token", { usageToken }).then((c) => { setConfig(c); setUsageToken(""); setUsageStatus(t("usage.saving_token")); return refreshUsageAfterToken(t("usage.manual_saved")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.save_fail")); }).finally(() => setBusy(false)); }, [refreshUsageAfterToken, usageToken]);
+  const clearUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_usage_token").then((c) => { setConfig(c); setUsageToken(""); setUsageStatus(t("usage.cleared_token")); onUsageCleared(); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, [onUsageCleared]);
   const startMimoSync = React.useCallback(() => { setMimoSyncing(true); setMimoStatus(t("mimo.opening_page")); void invoke<boolean>("start_mimo_sync").then((a) => { setMimoStatus(a ? t("mimo.opened_confirm") : t("mimo.login_hint")); setMimoSyncing(false); }).catch((e) => { setMimoStatus(typeof e === "string" ? e : t("mimo.sync_fail")); setMimoSyncing(false); }); }, []);
   const saveRefreshInterval = React.useCallback((s: number) => { const p = refresh; setRefresh(s); onRefreshIntervalChanged(s); void invoke<AppConfig>("save_refresh_interval", { refreshIntervalSeconds: s }).then((c) => { setConfig(c); setRefresh(c.refreshIntervalSeconds || 60); onRefreshIntervalChanged(c.refreshIntervalSeconds || 60); }).catch(() => { setRefresh(p); onRefreshIntervalChanged(p); }); }, [onRefreshIntervalChanged, refresh]);
   const saveAutoRefreshEnabled = React.useCallback((e: boolean) => { const p = autoRefresh; setAutoRefresh(e); onAutoRefreshChanged(e); void invoke<AppConfig>("save_auto_refresh_enabled", { autoRefreshEnabled: e }).then((c) => { setConfig(c); setAutoRefresh(c.autoRefreshEnabled); onAutoRefreshChanged(c.autoRefreshEnabled); }).catch(() => { setAutoRefresh(p); onAutoRefreshChanged(p); }); }, [autoRefresh, onAutoRefreshChanged]);
@@ -158,23 +154,6 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
     onEfficiencyUnitChanged(val);
     void invoke<AppConfig>("save_efficiency_unit", { unit: val }).then((c) => { setConfig(c); }).catch(() => { setEfficiencyUnit(prev); onEfficiencyUnitChanged(prev); });
   }, [efficiencyUnit, onEfficiencyUnitChanged]);
-
-  /** 同步账户列表状态（AppConfig 返回后调用） */
-  const setAccountsState = (c: AppConfig) => {
-    onAccountsChanged(c.accounts || [], c.activeAccountId || null);
-  };
-
-  const addAccount = React.useCallback(() => {
-    const name = newAccountName.trim();
-    if (!name) return;
-    void invoke<AppConfig>("add_account", { name }).then((c) => { setConfig(c); setNewAccountName(""); setAccountsState(c); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.add_fail")); });
-  }, [newAccountName]);
-  const switchAccount = React.useCallback((id: string) => {
-    void invoke<AppConfig>("switch_account", { id }).then((c) => { setConfig(c); setAccountsState(c); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.switch_account")); });
-  }, []);
-  const deleteAccount = React.useCallback((id: string) => {
-    void invoke<AppConfig>("delete_account", { id }).then((c) => { setConfig(c); setAccountsState(c); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.delete_fail")); });
-  }, []);
 
   // Apply theme on mount and when theme changes
   React.useEffect(() => {
@@ -314,33 +293,6 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   // Account category content - always show both platforms
   const accountContent = (
     <>
-      {/* 多账户管理（DeepSeek） */}
-      <SettingsSection icon={<User size={15} />} title={t('settings.accounts_title')}>
-        <p>{t('settings.accounts_desc')}</p>
-        {accounts.map((acc) => (
-          <div key={acc.id} className="account-row">
-            <div className="account-row-main">
-              <strong>{acc.name}</strong>
-              <span className="muted">
-                {t('settings.api_key')}: {acc.apiKeyConfigured ? t('settings.verified') : t('settings.not_configured')} · {t('usage.title')}: {acc.usageTokenConfigured ? t('settings.verified') : t('settings.not_configured')}
-              </span>
-            </div>
-            {activeAccountId === acc.id ? (
-              <span className="configured"><CheckCircle2 size={15} />{t('settings.active')}</span>
-            ) : (
-              <button className="secondary" onClick={() => switchAccount(acc.id)}>{t('settings.switch_account')}</button>
-            )}
-            {accounts.length > 1 && (
-              <button className="danger-link" onClick={() => deleteAccount(acc.id)} title={t('settings.delete_account')}>{t('settings.delete_account')}</button>
-            )}
-          </div>
-        ))}
-        <div className="key-row">
-          <input aria-label={t('settings.account_name')} type="text" maxLength={40} value={newAccountName} placeholder={t('settings.account_name_ph')} onChange={(e) => setNewAccountName(e.target.value)} />
-          <button className="primary" onClick={addAccount} disabled={!newAccountName.trim()}>{t('settings.add_account')}</button>
-        </div>
-      </SettingsSection>
-
       {/* DeepSeek Account */}
       <div style={{ marginBottom: 16, borderLeft: '3px solid #4f8cff', paddingLeft: 12 }}>
         <div style={{ fontSize: '1em', fontWeight: 600, marginBottom: 12, color: '#4f8cff' }}>DeepSeek</div>
@@ -380,6 +332,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           {mimoStatus && <p className="muted">{mimoStatus}</p>}
         </SettingsSection>
       </div>
+
     </>
   );
   const generalContent = (

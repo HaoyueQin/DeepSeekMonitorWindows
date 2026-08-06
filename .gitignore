@@ -70,3 +70,7 @@ Desktop.ini
 # ---------- AI agent ----------
 .reasonix/
 HANDOVER.md
+
+# ---------- 签名密钥 ----------
+*.key
+*.pem

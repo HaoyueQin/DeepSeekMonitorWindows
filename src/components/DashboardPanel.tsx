@@ -1,7 +1,7 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BarChart3, Brain, CalendarDays, CreditCard, Settings, Shirt, SunMedium, X, Zap, RefreshCw, LineChart } from "lucide-react";
-import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel, AppConfig, BalanceHistoryEntry } from "../types";
+import { BarChart3, Brain, CalendarDays, CreditCard, Settings, Shirt, SunMedium, X, Zap, RefreshCw } from "lucide-react";
+import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel, AppConfig } from "../types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon } from "../utils";
 import { t, tpl } from "../i18n";
 
@@ -50,64 +50,6 @@ export function BalanceCard({ balance, state, error, todayCost, monthCost, provi
           <strong>{monthCost != null ? fmtMoney(monthCost, currency, exchangeRate) : "—"}</strong>
         </div>
       </div>
-    </article>
-  );
-}
-
-// ─── BalanceHistoryCard（余额走势）─────────────────────────
-const HISTORY_RANGES = [7, 30, 90] as const;
-
-export function BalanceHistoryCard({ history }: { history: BalanceHistoryEntry[] }) {
-  const [range, setRange] = React.useState<number>(30);
-  const W = 300, H = 72, PAD = 4;
-
-  // 按日期升序取最近 range 天
-  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
-  const cutoff = dateKey(addDays(new Date(), -(range - 1)));
-  const points = sorted.filter((e) => e.date >= cutoff).slice(-range);
-  const latest = points[points.length - 1];
-
-  let body: React.ReactNode;
-  if (points.length < 2) {
-    body = <div className="chart-placeholder">{t("balance.history_empty")}</div>;
-  } else {
-    const values = points.map((p) => p.balance);
-    const max = Math.max(...values, 0);
-    const min = Math.min(...values, 0);
-    const span = max - min || 1;
-    const xs = points.map((_, i) => PAD + (i / (points.length - 1)) * (W - PAD * 2));
-    const ys = values.map((v) => H - PAD - ((v - min) / span) * (H - PAD * 2));
-    const line = points.map((_, i) => `${xs[i].toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
-    const area = `${PAD},${H - PAD} ${line} ${xs[xs.length - 1].toFixed(1)},${H - PAD}`;
-
-    body = (
-      <>
-        <svg className="balance-history-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-          <polygon points={area} className="bh-area" />
-          <polyline points={line} className="bh-line" fill="none" />
-          {points.map((p, i) => (
-            <circle key={p.date} cx={xs[i]} cy={ys[i]} r={2.2} className="bh-dot" />
-          ))}
-        </svg>
-        <div className="bh-footer">
-          <span>{points[0].date.slice(5)} → {latest.date.slice(5)}</span>
-          <strong>{fmtMoney(latest.balance)}</strong>
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <article className="card balance-history-card">
-      <div className="card-title-row">
-        <div className="caption-with-icon"><LineChart size={15} className="brand-blue" /><span>{t("balance.history")}</span></div>
-        <div className="chart-mode-toggle">
-          {HISTORY_RANGES.map((r) => (
-            <button key={r} className={range === r ? "active" : ""} onClick={() => setRange(r)}>{t(`balance.history_${r}d`)}</button>
-          ))}
-        </div>
-      </div>
-      {body}
     </article>
   );
 }
@@ -177,7 +119,6 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
 }) {
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
   const [weekOffset, setWeekOffset] = React.useState(0);
-  const [chartMode, setChartMode] = React.useState<"bar" | "line">("bar");
   const MIN_BAR = 3;
   const DAYS_PER_WEEK = 7;
 
@@ -247,69 +188,38 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
     </div>
   );
 
-  const chartBody = chartMode === "bar" ? (
-    <div className="bars" onMouseLeave={() => setHoveredIdx(null)}>
-      {points.map((point, idx) => (
-        <div className="bar-column" key={point.date} onMouseEnter={() => setHoveredIdx(idx)}>
-          {hoveredIdx === idx && renderTooltip(point, idx)}
-          <span className="bar-value">{point.total > 0 ? fmtTokensShort(point.total) : "0"}</span>
-          <div className="bar-slot">
-            <div className="cache-bar" style={{ height: `${point.total > 0 ? Math.max(MIN_BAR, (point.total / maxVal) * 100) : MIN_BAR}%` }}>
-              {point.total > 0 ? (
-                <>
-                  {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
-                  {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
-                  {point.response > 0 && <i className="seg response" style={{ flexGrow: point.response }} />}
-                </>
-              ) : <i className="seg empty" />}
-            </div>
-          </div>
-          <span className="bar-day">{mmdd(point.date)}</span>
-        </div>
-      ))}
-    </div>
-  ) : (
-    <div className="line-chart" onMouseLeave={() => setHoveredIdx(null)}>
-      <svg viewBox="0 0 700 140" preserveAspectRatio="none">
-        {(["hit", "miss", "response"] as const).map((key) => {
-          const values = points.map((p) => p[key]);
-          const pts = values.map((v, i) => `${(i / (points.length - 1)) * 700},${140 - (v / maxVal) * 130}`).join(" ");
-          return <polyline key={key} points={pts} className={`lc-line ${key}`} fill="none" />;
-        })}
-      </svg>
-      {points.map((point, idx) => (
-        <div
-          key={point.date}
-          className="line-point"
-          style={{ left: `${(idx / (points.length - 1)) * 100}%` }}
-          onMouseEnter={() => setHoveredIdx(idx)}
-        >
-          {hoveredIdx === idx && renderTooltip(point, idx)}
-          <span className="line-point-date">{mmdd(point.date)}</span>
-        </div>
-      ))}
-    </div>
-  );
-
   return (
     <article className="card chart-card">
       <div className="card-title-row">
         <div className="caption-with-icon"><BarChart3 size={16} className="brand-blue" /><span>{t("chart.cache_hit")}</span></div>
-        <div className="chart-nav-wrap">
-          <div className="chart-mode-toggle">
-            <button className={chartMode === "bar" ? "active" : ""} onClick={() => setChartMode("bar")}>{t("chart.bar")}</button>
-            <button className={chartMode === "line" ? "active" : ""} onClick={() => setChartMode("line")}>{t("chart.line")}</button>
-          </div>
-          <div className="chart-nav">
-            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title={t("chart.prev_week")}>‹</button>
-            <span className="chart-nav-label">{weekLabel}</span>
-            <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title={t("chart.next_week")}>›</button>
-          </div>
+        <div className="chart-nav">
+          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o - 1)} disabled={!canGoBack} title={t("chart.prev_week")}>‹</button>
+          <span className="chart-nav-label">{weekLabel}</span>
+          <button className="chart-nav-btn" onClick={() => setWeekOffset((o) => o + 1)} disabled={!canGoForward} title={t("chart.next_week")}>›</button>
         </div>
       </div>
       {state === "ok" && points.length > 0 ? (
         <>
-          {chartBody}
+          <div className="bars" onMouseLeave={() => setHoveredIdx(null)}>
+            {points.map((point, idx) => (
+              <div className="bar-column" key={point.date} onMouseEnter={() => setHoveredIdx(idx)}>
+                {hoveredIdx === idx && renderTooltip(point, idx)}
+                <span className="bar-value">{point.total > 0 ? fmtTokensShort(point.total) : "0"}</span>
+                <div className="bar-slot">
+                  <div className="cache-bar" style={{ height: `${point.total > 0 ? Math.max(MIN_BAR, (point.total / maxVal) * 100) : MIN_BAR}%` }}>
+                    {point.total > 0 ? (
+                      <>
+                        {point.hit > 0 && <i className="seg hit" style={{ flexGrow: point.hit }} />}
+                        {point.miss > 0 && <i className="seg miss" style={{ flexGrow: point.miss }} />}
+                        {point.response > 0 && <i className="seg response" style={{ flexGrow: point.response }} />}
+                      </>
+                    ) : <i className="seg empty" />}
+                  </div>
+                </div>
+                <span className="bar-day">{mmdd(point.date)}</span>
+              </div>
+            ))}
+          </div>
           <div className="chart-footer">
             <span className="chart-total">{state === "ok" ? `${hitRate}% · ${fmtTokensShort(sumTotal)} · ${ratio}` : "—"}</span>
             <span className="chart-legend">
@@ -332,7 +242,7 @@ const MIMO_DEFAULT_MODELS: MimoUsageModel[] = [
 ];
 
 // ─── DashboardPanel ────────────────────────────────────────
-export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate, efficiencyUnit, balanceHistory }: {
+export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate, efficiencyUnit }: {
   provider: Provider;
   onProviderChange: (p: Provider) => void;
   balance: BalanceData | MimoBalanceData | null;
@@ -348,7 +258,6 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   currency: "cny" | "usd";
   exchangeRate: number;
   efficiencyUnit: "token_per_currency" | "currency_per_token";
-  balanceHistory: BalanceHistoryEntry[];
 }) {
   // Theme is managed by SettingsPanel via config; just ensure data-theme is set on mount
   React.useEffect(() => {
@@ -366,9 +275,9 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   const mimoToday = mimoUsage?.days.find((day) => day.date === todayStr()) ?? null;
   const todayCost = usageState === "ok" ? (isDeepSeek ? (today ? today.totalCost : null) : (mimoToday ? mimoToday.totalCost : null)) : null;
   const monthCost = usageState === "ok" && usage ? usage.monthCost : null;
-  const topModels = mimoUsage ? MIMO_DEFAULT_MODELS.map((def) => mimoUsage.models.find((m) => m.key === def.key) ?? def) : MIMO_DEFAULT_MODELS;
-  const providerHistory = balanceHistory.filter((e) => e.provider === provider);
-
+  const topModels = isDeepSeek
+    ? []
+    : MIMO_DEFAULT_MODELS.map((def) => (mimoUsage as MimoUsageResult)?.models.find((m) => m.key === def.key) ?? def);
   return (
     <section className="panel dashboard-panel" data-testid="dashboard-panel">
       <header className="panel-header" data-tauri-drag-region>
@@ -385,7 +294,6 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
         </div>
       </header>
       <BalanceCard balance={balance} state={balanceState} error={balanceError} todayCost={todayCost} monthCost={monthCost} provider={provider} currency={currency} exchangeRate={exchangeRate} />
-      <BalanceHistoryCard history={providerHistory} />
       <div className="usage-stack">
         {isDeepSeek ? (
           <>
