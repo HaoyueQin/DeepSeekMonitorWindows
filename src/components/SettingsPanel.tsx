@@ -7,7 +7,7 @@ import {
   BarChart3, CheckCircle2, Info, KeyRound, Power, Settings, X,
   User, Monitor, Bell, Palette, Globe, ChevronRight,
 } from "lucide-react";
-import type { Provider, AppConfig, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult } from "../types";
+import type { Provider, AppConfig, BalanceData, UsageResult, MimoUsageResult } from "../types";
 import { fmtMoney, addDays, previousMonth } from "../utils";
 import { t, tpl, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
@@ -109,10 +109,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
   React.useEffect(() => { const p = listen("usage-sync-ended", () => { setUsageSyncing(false); setUsageStatus(t("usage.sync_ended")); }); return () => { void p.then((u) => u()); }; }, []);
   React.useEffect(() => { const p = listen("mimo-sync-started", () => { setMimoStatus(t("mimo.login_hint")); }); return () => { void p.then((u) => u()); }; }, []);
 
-  const pasteApiKey = React.useCallback(async () => { try { setApiKey((await navigator.clipboard.readText()).trim()); setStatus(t("settings.clipboard_read")); } catch { setStatus(t("settings.clipboard_fail")); } }, []);
   const saveApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_api_key", { apiKey }).then((c) => { setConfig(c); setApiKey(""); setStatus(t("settings.saving_key")); return invoke<BalanceData>("fetch_balance"); }).then((b) => { setStatus(`${t("settings.verify_ok")} ${b.currency === "USD" ? "$" : "¥"}${b.totalBalance}${b.isAvailable ? "" : t("settings.balance_low_suffix")}`); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.save_verify_fail")); }).finally(() => setBusy(false)); }, [apiKey]);
   const clearApiKey = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_api_key").then((c) => { setConfig(c); setApiKey(""); setStatus(t("settings.cleared_key")); }).catch((e) => { setStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, []);
-  const pasteUsageToken = React.useCallback(async () => { try { setUsageToken((await navigator.clipboard.readText()).trim()); setUsageStatus(t("settings.clipboard_read")); } catch { setUsageStatus(t("settings.clipboard_fail")); } }, []);
   const startUsageSync = React.useCallback(() => { setUsageSyncing(true); setUsageStatus(t("usage.opening_login")); void invoke<boolean>("start_usage_sync").then((s) => { if (!s) setUsageStatus(t("usage.reopen_hint")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.open_fail")); }).finally(() => { window.setTimeout(() => setUsageSyncing(false), 2500); }); }, []);
   const saveUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("save_usage_token", { usageToken }).then((c) => { setConfig(c); setUsageToken(""); setUsageStatus(t("usage.saving_token")); return refreshUsageAfterToken(t("usage.manual_saved")); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("usage.save_fail")); }).finally(() => setBusy(false)); }, [refreshUsageAfterToken, usageToken]);
   const clearUsageToken = React.useCallback(() => { setBusy(true); void invoke<AppConfig>("clear_usage_token").then((c) => { setConfig(c); setUsageToken(""); setUsageStatus(t("usage.cleared_token")); onUsageCleared(); }).catch((e) => { setUsageStatus(typeof e === "string" ? e : t("settings.clear_fail")); }).finally(() => setBusy(false)); }, [onUsageCleared]);
@@ -250,7 +248,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             releases.push({ repo: `${repo.owner}${repo.label}`, tag: r.tag_name, date, html });
           }
         } catch (e) {
-          releases.push({ repo: `${repo.owner}${repo.label}`, tag: "错误", date: "", html: `<em>无法获取更新日志...</em>` });
+          releases.push({ repo: `${repo.owner}${repo.label}`, tag: t("settings.release_error"), date: "", html: `<em>${t("settings.changelog_fetch_failed")}</em>` });
         }
       }
       setChangelogReleases(releases);
@@ -305,6 +303,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
             <span className={config?.apiKeyConfigured ? "configured" : "configured muted-status"}><CheckCircle2 size={17} />{config?.apiKeyConfigured ? t('settings.verified') : t('settings.not_configured')}</span>
             <button className="secondary" onClick={clearApiKey} disabled={busy || !config?.apiKeyConfigured}>{t('settings.clear')}</button>
           </div>
+          {status && <p className="muted">{status}</p>}
         </SettingsSection>
         <SettingsSection icon={<BarChart3 size={15} />} title={t('usage.title')}>
           <p>{t('usage.desc')}</p>

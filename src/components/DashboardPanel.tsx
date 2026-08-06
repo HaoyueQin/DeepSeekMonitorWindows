@@ -170,7 +170,7 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
   const weekLabel = weekOffset === 0 ? t("chart.this_week") : weekOffset === -1 ? t("chart.last_week") : tpl("chart.weeks_ago", { n: -weekOffset });
   const placeholder = state === "loading" ? t("app.loading") : state === "nokey" ? t("app.unconfigured_usage_token") : state === "error" ? error : t("app.no_data");
 
-  /** tooltip 内容（柱状图与折线图共用） */
+  /** tooltip 内容 */
   const renderTooltip = (point: (typeof points)[number], idx: number) => (
     <div className={`bar-tooltip${idx <= 1 ? " align-left" : idx >= points.length - 2 ? " align-right" : ""}`}>
       <div className="bar-tooltip-head"><span className="bar-tooltip-date">{point.date}</span><strong>{fmtInt(point.total)} tokens</strong></div>

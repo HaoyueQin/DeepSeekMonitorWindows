@@ -15,7 +15,6 @@ const translations: Record<string, Record<Lang, string>> = {
   'app.unconfigured': { zh: '未配置', en: 'Not configured' },
   'app.unconfigured_token': { zh: '未配置 Token', en: 'Token not configured' },
   'app.unconfigured_usage_token': { zh: '未配置用量 Token', en: 'Usage token not configured' },
-  'app.unavailable': { zh: '不可用', en: 'Unavailable' },
   'app.no_data': { zh: '暂无数据', en: 'No data' },
   'app.tokens': { zh: 'tokens', en: 'tokens' },
 
@@ -126,6 +125,8 @@ const translations: Record<string, Record<Lang, string>> = {
   'settings.view_changelog': { zh: '查看更新日志', en: 'View changelog' },
   'settings.hide_changelog': { zh: '收起更新日志', en: 'Hide changelog' },
   'settings.changelog_fail': { zh: '获取更新日志失败', en: 'Failed to fetch changelog' },
+  'settings.release_error': { zh: '错误', en: 'Error' },
+  'settings.changelog_fetch_failed': { zh: '无法获取更新日志...', en: 'Failed to fetch changelog...' },
   'settings.reading_config': { zh: '正在读取本地配置', en: 'Reading local config…' },
   'settings.browser_preview': { zh: '浏览器预览模式', en: 'Browser preview mode' },
   'settings.clipboard_read': { zh: '已从剪贴板读取', en: 'Read from clipboard' },

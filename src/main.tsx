@@ -307,6 +307,13 @@ function App() {
     return () => window.clearInterval(timer);
   }, [autoRefreshEnabled, loadBalance, refreshCurrentMonth, refreshIntervalSeconds]);
 
+  // 历史深度变化后重新加载用量（避免 onHistoryMonthsChanged 中闭包读到旧值）
+  React.useEffect(() => {
+    if (!initialLoadDone.current) return;
+    void reloadCache();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyMonths]);
+
   const setProvider = React.useCallback((next: Provider) => {
     setProviderState(next);
     dispatch({ type: "RESET" });
@@ -390,7 +397,7 @@ function App() {
           onEfficiencyUnitChanged={setEfficiencyUnit}
           onReloadCache={reloadCache}
           historyMonths={historyMonths}
-          onHistoryMonthsChanged={(n) => { setHistoryMonths(n); void reloadCache(); }}
+          onHistoryMonthsChanged={setHistoryMonths}
         />
       )}
       {view === "detail" && (

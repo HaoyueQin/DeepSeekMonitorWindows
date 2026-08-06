@@ -117,6 +117,7 @@ pub fn ensure_mimo_webview_sync(app: &tauri::AppHandle) -> Result<tauri::Webview
 /// 在 MiMo WebView 中执行一次 fetch，结果经 127.0.0.1 回调服务器回传。
 ///
 /// `method` 取值 "GET"/"POST"，`body` 为已序列化的 JSON 字符串（POST 时使用）。
+/// `silent_401` 为 true 时遇到 401 不导航登录页、不 emit 事件（fast-path 静默降级用）。
 /// 仅在 eval JS 的瞬间持有全局锁，等待回调时不持锁，允许多个请求并发 pending。
 pub async fn fetch_mimo_api(
     app: &tauri::AppHandle,
@@ -124,6 +125,7 @@ pub async fn fetch_mimo_api(
     method: &str,
     timeout_secs: u64,
     body: Option<&str>,
+    silent_401: bool,
 ) -> Result<String, AppError> {
     let lock_guard = app.state::<Arc<tokio::sync::Mutex<()>>>();
 
@@ -217,17 +219,19 @@ pub async fn fetch_mimo_api(
                                 .and_then(|d| d.get("loginUrl"))
                                 .and_then(|v| v.as_str())
                         });
-                    // 401 需要导航到登录页，持锁避免与其他请求冲突
-                    let _lock = lock_guard.lock().await;
-                    if let Some(url) = login_url {
-                        // Use serde_json::to_string for proper JS string escaping
-                        let safe_url = serde_json::to_string(url).unwrap_or_default();
-                        let _ = window
-                            .eval(format!("window.location.href={}", safe_url));
-                    } else {
-                        let _ = window.eval("window.location.href='https://account.xiaomi.com/pass/serviceLogin?sid=platform.xiaomimimo.com'");
+                    // 401 处理：非 silent 时导航登录页并提示（持锁避免与其他请求冲突）
+                    if !silent_401 {
+                        let _lock = lock_guard.lock().await;
+                        if let Some(url) = login_url {
+                            // Use serde_json::to_string for proper JS string escaping
+                            let safe_url = serde_json::to_string(url).unwrap_or_default();
+                            let _ = window
+                                .eval(format!("window.location.href={}", safe_url));
+                        } else {
+                            let _ = window.eval("window.location.href='https://account.xiaomi.com/pass/serviceLogin?sid=platform.xiaomimimo.com'");
+                        }
+                        let _ = app.emit("mimo-auth-required", ());
                     }
-                    let _ = app.emit("mimo-auth-required", ());
                     return Err(AppError::Auth(
                         "MiMo 未登录，请在弹出的窗口中完成登录后重试".to_string(),
                     ));
@@ -277,7 +281,7 @@ fn parse_mimo_api_response<T: serde::de::DeserializeOwned>(json: &str) -> Result
 // ─── 余额查询 ────────────────────────────────────────────
 
 pub async fn do_fetch_mimo_balance(app: &tauri::AppHandle) -> Result<MimoBalanceResult, AppError> {
-    let json = fetch_mimo_api(app, "/api/v1/balance", "GET", 15, None).await?;
+    let json = fetch_mimo_api(app, "/api/v1/balance", "GET", 15, None, false).await?;
     log::debug!("[MiMo] /api/v1/balance response received ({} chars)", json.len());
 
     #[derive(Deserialize)]
@@ -354,7 +358,7 @@ pub async fn do_fetch_mimo_usage(
     month: u32,
     year: u32,
 ) -> Result<MimoUsageResult, AppError> {
-    let overview_json = fetch_mimo_api(app, "/api/v1/usage", "GET", 15, None).await?;
+    let overview_json = fetch_mimo_api(app, "/api/v1/usage", "GET", 15, None, false).await?;
     log::debug!(
         "[MiMo] /api/v1/usage response ({} bytes)",
         overview_json.len()
@@ -606,7 +610,7 @@ async fn fetch_mimo_usage_detail(
             // 正确构造 JSON body：{"year":2026,"month":6}
             let body_json = format!("{{\"year\":{},\"month\":{}}}", year, month);
             let api_url = format!("/api/v1/usage/detail/list?api-platform_ph={}", ph);
-            let json = match fetch_mimo_api(app, &api_url, "POST", 10, Some(&body_json)).await {
+            let json = match fetch_mimo_api(app, &api_url, "POST", 10, Some(&body_json), true).await {
                 Ok(j) => j,
                 Err(AppError::Auth(_)) => {
                     // ph 已失效：清除缓存，静默降级到页面提取（页面提取有独立的 401 处理）

@@ -65,7 +65,6 @@ beforeEach(() => {
       case "get_app_config": return config;
       case "fetch_balance": return balance;
       case "fetch_usage": return usage;
-      case "get_balance_history": return [];
       default: return {};
     }
   });
@@ -103,7 +102,6 @@ describe("App 集成流程", () => {
         case "get_app_config": return config;
         case "fetch_balance": throw new Error("网络错误");
         case "fetch_usage": return usage;
-        case "get_balance_history": return [];
         default: return {};
       }
     });
