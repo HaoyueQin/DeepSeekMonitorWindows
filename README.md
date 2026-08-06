@@ -203,7 +203,7 @@ Rust 后端依赖：
 - **错误处理结构化**：后端引入统一 `AppError` 错误枚举（网络/解析/认证/超时/配置/IO/加密分类），命令层保持兼容。
 - **代码清理**：合并 `fetch_mimo_api` 冗余函数链（三合一），fast-path 复用统一调用消除重复 JS 构造；删除死代码（`REFRESH_OPTIONS`、`refreshAll`、`in_progress_month`）；`StoredConfig` 全部字段补 `serde(default)` 修复旧配置兼容。
 - **Bug 修复**：修复 `loadUsage` 中 DeepSeek 用量查询结果从不写回缓存（每次启动全量重拉 12 个月）的问题；MiMo/DeepSeek 低余额通知逻辑统一。
-- **测试**：Rust 单元测试 33 个（config/deepseek/mimo 解析与聚合逻辑）；前端 Vitest 25 个（utils + 组件 + App 集成流程）。
+- **测试**：Rust 单元测试 26 个（config/deepseek/mimo 解析与聚合逻辑）；前端 Vitest 25 个（utils + 组件 + App 集成流程）。
 - **CI**：新增 GitHub Actions workflow（前端 tsc/vitest/build + Rust check/clippy/test + MiMo 性能验证脚本）。
 
 ### v2.5.5
