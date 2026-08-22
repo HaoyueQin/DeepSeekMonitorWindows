@@ -57,6 +57,15 @@ function clearOldCache(provider: Provider, historyMonths: number) {
   for (const key of toRemove) localStorage.removeItem(key);
 }
 
+/** 多个月合并时，monthCost 与 models 必须取“当前月”那一份。
+ *  载入路径中新鲜结果的追加顺序不保证当前月在首位（缓存命中顺序在前），
+ *  旧的 months[0] 写法在新月份首次启动时会错误显示上个月的总额与模型列表。 */
+function pickCurrentMonthEntry<T extends { days: { date: string }[] }>(months: T[]): T | undefined {
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return months.find((m) => m.days.some((d) => d.date.startsWith(ym))) ?? months[0];
+}
+
 /** 合并多个月的 UsageResult（DeepSeek） */
 function mergeDS(months: UsageResult[]): UsageResult {
   const daysMap = new Map<string, UsageResult['days'][number]>();
@@ -80,10 +89,11 @@ function mergeDS(months: UsageResult[]): UsageResult {
       }
     }
   }
+  const base = pickCurrentMonthEntry(months);
   return {
-    monthCost: months[0]?.monthCost ?? 0,
+    monthCost: base?.monthCost ?? 0,
     days: [...daysMap.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    models: months[0]?.models ?? [],
+    models: base?.models ?? [],
   };
 }
 
@@ -107,10 +117,11 @@ function mergeMimo(months: MimoUsageResult[]): MimoUsageResult {
       } else { daysMap.set(d.date, { ...d, models: d.models.map(m2 => ({ ...m2 })) }); }
     }
   }
+  const base = pickCurrentMonthEntry(months);
   return {
-    monthCost: months[0]?.monthCost ?? 0,
+    monthCost: base?.monthCost ?? 0,
     days: [...daysMap.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    models: months[0]?.models ?? [],
+    models: base?.models ?? [],
   };
 }
 
@@ -198,8 +209,12 @@ function App() {
     const cached: (UsageResult | MimoUsageResult)[] = [];
     const missing: { year: number; month: number }[] = [];
 
-    for (const { year, month } of months) {
-      const data = getCached(active, year, month);
+    for (let idx = 0; idx < months.length; idx++) {
+      const { year, month } = months[idx];
+      // 当前月永远视为缺失：隔天启动时昨天的缓存不能冒充今日数据
+      // （autoRefresh 默认关闭时没有其他自愈路径），必须重新拉取。
+      const isCurrentMonth = idx === 0; // yearMonths() 从当月开始
+      const data = isCurrentMonth ? null : getCached(active, year, month);
       if (data) {
         cached.push(data);
       } else if (!fetchingRef.current.has(cacheKey(active, year, month))) {
@@ -342,8 +357,11 @@ function App() {
       .then((config) => {
         if (!initialLoadDone.current) {
           initialLoadDone.current = true;
-          if (config.provider !== providerRef.current) { dispatch({ type: "RESET" }); }
-          providerRef.current = config.defaultProvider || config.provider; setProviderState(config.defaultProvider || config.provider);
+          // 初始加载必须全程用同一个 provider：state/ref 与实际加载的数据源一致。
+          // 否则 defaultProvider ≠ 最后使用平台时会出现“DeepSeek 界面装着 MiMo 数据”的错位，且不会自愈。
+          const startProvider = config.defaultProvider || config.provider;
+          if (startProvider !== providerRef.current) { dispatch({ type: "RESET" }); }
+          providerRef.current = startProvider; setProviderState(startProvider);
           setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60); setAutoRefreshEnabled(config.autoRefreshEnabled);
           setCurrency(config.currency || "cny");
           setEfficiencyUnit(config.efficiencyUnit || "currency_per_token");
@@ -365,7 +383,7 @@ function App() {
               })
               .catch(() => {});
           }
-          loadBalance(config.provider); loadUsage(config.provider);
+          loadBalance(startProvider); loadUsage(startProvider);
         }
       })
       .catch(() => { if (!initialLoadDone.current) { initialLoadDone.current = true; setRefreshIntervalSeconds(60); setAutoRefreshEnabled(false); loadBalance(); loadUsage(); } });

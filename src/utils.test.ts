@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon } from "./utils";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon, fetchWithCache, isAuthLikeError } from "./utils";
 
 describe("fmtInt", () => {
   it("formats integers with locale separators", () => {
@@ -96,5 +96,65 @@ describe("modelIcon", () => {
     expect(modelIcon("flash-vision")).toBe("vision");
     expect(modelIcon("some-vision-model")).toBe("vision");
     expect(modelIcon("deepseek-image-input")).toBe("vision");
+  });
+});
+
+describe("isAuthLikeError", () => {
+  it("detects auth/config failures that must not be masked by cache", () => {
+    expect(isAuthLikeError("API Key 无效或已过期")).toBe(true);
+    expect(isAuthLikeError("未配置 API Key")).toBe(true);
+    expect(isAuthLikeError("HTTP 状态码 401")).toBe(true);
+    expect(isAuthLikeError("认证失败：token 无效：HTTP 401")).toBe(true);
+    expect(isAuthLikeError("MiMo 未登录，请在弹出的窗口中完成登录后重试")).toBe(true);
+  });
+  it("does not classify transient errors as auth-like", () => {
+    expect(isAuthLikeError("网络请求失败：connection reset")).toBe(false);
+    expect(isAuthLikeError("请求过于频繁，请稍后再试")).toBe(false);
+    expect(isAuthLikeError(42)).toBe(false);
+  });
+});
+
+describe("fetchWithCache", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("stores successful results with a timestamp wrapper", async () => {
+    const data = await fetchWithCache("t-key", async () => ({ balance: 1 }));
+    expect(data).toEqual({ balance: 1 });
+    const raw = JSON.parse(localStorage.getItem("t-key")!);
+    expect(raw.__dsmWrapped).toBe(true);
+    expect(raw.data).toEqual({ balance: 1 });
+    expect(typeof raw.ts).toBe("number");
+  });
+
+  it("falls back to fresh cache on non-auth errors", async () => {
+    localStorage.setItem("t-key", JSON.stringify({ __dsmWrapped: true, ts: Date.now(), data: { balance: 9 } }));
+    const data = await fetchWithCache("t-key", async () => { throw "网络请求失败：timeout"; });
+    expect(data).toEqual({ balance: 9 });
+  });
+
+  it("propagates auth-like errors instead of serving stale balance", async () => {
+    localStorage.setItem("t-key", JSON.stringify({ __dsmWrapped: true, ts: Date.now(), data: { balance: 9 } }));
+    await expect(
+      fetchWithCache("t-key", async () => { throw "API Key 无效或已过期"; })
+    ).rejects.toBe("API Key 无效或已过期");
+  });
+
+  it("ignores cache older than ttl", async () => {
+    const stale = Date.now() - 25 * 3600 * 1000; // 超过默认 24h TTL
+    localStorage.setItem("t-key", JSON.stringify({ __dsmWrapped: true, ts: stale, data: { balance: 3 } }));
+    await expect(
+      fetchWithCache("t-key", async () => { throw "网络请求失败：offline"; })
+    ).rejects.toBe("网络请求失败：offline");
+  });
+
+  it("respects custom ttlMs", async () => {
+    const almostExpired = Date.now() - 10 * 60 * 1000; // 10 分钟前
+    localStorage.setItem("t-key", JSON.stringify({ __dsmWrapped: true, ts: almostExpired, data: { balance: 5 } }));
+    await expect(
+      fetchWithCache("t-key", async () => { throw "网络错误"; }, { ttlMs: 5 * 60 * 1000 })
+    ).rejects.toBe("网络错误");
+    const ok = await fetchWithCache("t-key", async () => { throw "网络错误"; }, { ttlMs: 60 * 60 * 1000 });
+    expect(ok).toEqual({ balance: 5 });
   });
 });
