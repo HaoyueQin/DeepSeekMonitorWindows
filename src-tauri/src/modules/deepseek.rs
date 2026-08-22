@@ -71,9 +71,6 @@ pub async fn do_fetch_balance() -> Result<BalanceResult, AppError> {
         200 => {}
         401 => return Err(AppError::Auth("API Key 无效或已过期".to_string())),
         429 => return Err(AppError::Other("请求过于频繁，请稍后再试".to_string())),
-        code if code >= 500 => {
-            return Err(AppError::Http(code));
-        }
         code => return Err(AppError::Http(code)),
     }
 
@@ -207,7 +204,13 @@ fn extract_user_api_token(text: &str) -> Option<String> {
     let marker = "\"token\":\"";
     while let Some(relative_index) = text[search_from..].find(marker) {
         let token_start = search_from + relative_index + marker.len();
-        let token_end = token_start + text[token_start..].find('"')?;
+        // 该 token 无闭合引号（截断/异常缓存文件）时只跳过此处，继续扫描后续内容；
+        // 不能用 `?` 直接返回 None，否则会放弃整个文件的剩余扫描。
+        let Some(relative_end) = text[token_start..].find('"') else {
+            search_from = token_start + 1;
+            continue;
+        };
+        let token_end = token_start + relative_end;
         let token = &text[token_start..token_end];
         let context_end = (token_end + 1800).min(text.len());
         let context = &text[token_end..context_end];

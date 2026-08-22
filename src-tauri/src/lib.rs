@@ -32,9 +32,15 @@ impl CallbackServer {
         let server = Server::http("127.0.0.1:0").map_err(|e| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, format!("无法启动回调服务器：{e}")))?;
         let port = server.server_addr().to_ip().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "回调服务器地址无效"))?.port();
         std::thread::spawn(move || {
-            while let Ok(Some(mut request)) =
-                server.recv_timeout(std::time::Duration::from_secs(3600))
-            {
+            // recv_timeout 空闲超时会返回 Ok(None)，不能因此退出循环：
+            // 否则回调线程在空闲 1 小时后永久死亡，MiMo 快速路径全部超时。
+            loop {
+                let request = match server.recv_timeout(std::time::Duration::from_secs(3600)) {
+                    Ok(Some(request)) => request,
+                    Ok(None) => continue, // 空闲超时：继续等待下一个请求
+                    Err(_) => break,      // 服务器不可恢复错误：退出
+                };
+                let mut request = request;
                 if *request.method() == Method::Options {
                     let response = Response::from_string(String::new())
                         .with_header(
@@ -147,7 +153,9 @@ fn clear_api_key() -> Result<AppConfig, String> {
 #[tauri::command]
 fn save_refresh_interval(refresh_interval_seconds: u64) -> Result<AppConfig, String> {
     let mut config = config::read_stored_config()?;
-    config.refresh_interval_seconds = refresh_interval_seconds;
+    // 写入时同样归一化，避免“UI 显示 30s、下次读取变 60s”的前后不一致
+    config.refresh_interval_seconds =
+        config::normalize_refresh_interval_seconds(refresh_interval_seconds);
     config::write_stored_config(&config)?;
     Ok(config::to_app_config(config)?)
 }

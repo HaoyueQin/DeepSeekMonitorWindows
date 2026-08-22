@@ -123,16 +123,22 @@ fn hex_encode(data: &[u8]) -> String {
 }
 
 fn hex_decode(hex: &str) -> Result<Vec<u8>, AppError> {
-    if hex.len() % 2 != 0 {
+    // 必须按字节处理：直接对 str 切片在多字节 UTF-8 输入下会因非字符边界而 panic
+    let bytes = hex.as_bytes();
+    if bytes.len() % 2 != 0 {
         return Err(AppError::Crypto("十六进制编码长度无效".to_string()));
     }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&hex[i..i + 2], 16)
-                .map_err(|e| AppError::Crypto(format!("十六进制解码失败：{e}")))
-        })
-        .collect()
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        let hi = (pair[0] as char)
+            .to_digit(16)
+            .ok_or_else(|| AppError::Crypto("十六进制解码失败：非法字符".to_string()))?;
+        let lo = (pair[1] as char)
+            .to_digit(16)
+            .ok_or_else(|| AppError::Crypto("十六进制解码失败：非法字符".to_string()))?;
+        out.push(((hi << 4) | lo) as u8);
+    }
+    Ok(out)
 }
 
 pub fn encrypt_credential(plain: &str) -> Result<String, AppError> {
@@ -171,7 +177,7 @@ pub fn config_path() -> Result<PathBuf, AppError> {
 
 // ─── 配置读写 ────────────────────────────────────────────
 
-fn normalize_refresh_interval_seconds(value: u64) -> u64 {
+pub fn normalize_refresh_interval_seconds(value: u64) -> u64 {
     match value {
         0 => 60,
         v if v < 60 => 60,
@@ -227,6 +233,15 @@ mod tests {
     fn decrypt_invalid_hex() {
         let result = decrypt_credential("enc1:invalid_hex");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn decrypt_multibyte_hex_is_error_not_panic() {
+        // 多字节 UTF-8（偶数字节长度）历史上会在字符边界切片 panic，必须返回 Err
+        let result = decrypt_credential("enc1:中文");
+        assert!(result.is_err());
+        let result2 = decrypt_credential("enc1:ab\u{4e2d}");
+        assert!(result2.is_err());
     }
 
     #[test]

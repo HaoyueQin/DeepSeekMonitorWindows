@@ -5,6 +5,7 @@
 
 use std::{
     collections::HashMap,
+    hash::{BuildHasher, Hasher},
     sync::{Arc, Mutex},
 };
 
@@ -138,12 +139,16 @@ pub async fn fetch_mimo_api(
         .unwrap()
         .0;
 
+    // 纳秒时间戳 + 随机段：回调服务器 CORS 为 *，可预测的纯时间戳 reqId
+    // 允许恶意网页在猜中端口后伪造回调，随机段消除该风险。
+    let random_salt = std::collections::hash_map::RandomState::new().build_hasher().finish();
     let req_id = format!(
-        "__mimo_{}",
+        "__mimo_{}_{:016x}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos()
+            .as_nanos(),
+        random_salt
     );
 
     let (tx, rx) = oneshot::channel();
@@ -676,12 +681,14 @@ async fn fetch_mimo_usage_detail(
     while start.elapsed() < std::time::Duration::from_secs(POLL_TIMEOUT_SECS) {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
+        let chk_salt = std::collections::hash_map::RandomState::new().build_hasher().finish();
         let req_id = format!(
-            "__chk_{}",
+            "__chk_{}_{:016x}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            chk_salt
         );
         let (tx, rx) = oneshot::channel();
         {
@@ -710,9 +717,15 @@ async fn fetch_mimo_usage_detail(
             window.eval(&check_js)
         };
 
-        if let Ok(Ok(data)) =
-            tokio::time::timeout(std::time::Duration::from_secs(5), rx).await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            Err(_) | Ok(Err(_)) => {
+                // 超时/通道关闭：移除条目，避免死 sender 在 shared_map 中累积泄漏
+                let state =
+                    app.state::<Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>>();
+                state.lock().unwrap().remove(&req_id);
+                continue;
+            }
+            Ok(Ok(data)) => {
             log::info!(
                 "[MiMo] detail check (first 200): {}",
                 &data[..data.len().min(200)]
@@ -780,7 +793,8 @@ async fn fetch_mimo_usage_detail(
                     log::info!("[MiMo] detail API returned empty data (no usage this month), ph cached, continuing poll...");
                 }
             }
-        }
+            } // Ok(Ok(data)) 分支结束
+        } // match timeout 结束
     }
 
     {
