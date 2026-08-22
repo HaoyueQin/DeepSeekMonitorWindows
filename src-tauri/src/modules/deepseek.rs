@@ -308,7 +308,6 @@ pub const USAGE_SYNC_POLL_JS: &str = r#"
   if (window.__dsm_token_hook__) return;
   window.__dsm_token_hook__ = true;
   var done = false;
-  var pending = false;
 
   function deliver(token) {
     if (done) return;
@@ -318,15 +317,9 @@ pub const USAGE_SYNC_POLL_JS: &str = r#"
     var now = new Date();
     var y = now.getFullYear();
     var m = now.getMonth() + 1;
-    try { document.title = 'DSM_USAGE_TOKEN:' + y + ':' + m + ':' + token; } catch (e) {}
-    try {
-      if (!pending && window.__TAURI__ && window.__TAURI__.core) {
-        pending = true;
-        window.__TAURI__.core.invoke('usage_token_captured', {
-          token: token, month: m, year: y
-        }).then(function() { done = true; }).catch(function() { pending = false; });
-      }
-    } catch (e) {}
+    // 唯一投递通道是 window.title（由 Rust 侧 title 轮询消费）。
+    // 曾有的 window.__TAURI__.core.invoke 分支是死代码：withGlobalTauri=false 时登录窗口没有全局 __TAURI__。
+    try { document.title = 'DSM_USAGE_TOKEN:' + y + ':' + m + ':' + token; done = true; } catch (e) {}
   }
 
   function fromAuth(value) {

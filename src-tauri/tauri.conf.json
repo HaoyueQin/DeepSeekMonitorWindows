@@ -30,7 +30,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' https://asset.localhost https://tauri.localhost data:; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost https://api.github.com https://open.er-api.com"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://asset.localhost https://tauri.localhost data:; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost https://api.github.com https://open.er-api.com"
     }
   },
   "bundle": {

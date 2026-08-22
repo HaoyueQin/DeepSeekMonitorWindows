@@ -11,6 +11,7 @@ import type { Provider, AppConfig, BalanceData, UsageResult, MimoUsageResult } f
 import { fmtMoney, addDays, previousMonth } from "../utils";
 import { t, tpl, getLang, setLang, LANG_OPTIONS } from "../i18n";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 // ─── SettingsPanel ─────────────────────────────────────────
 export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoaded, onUsageCleared, onRefreshIntervalChanged, onAutoRefreshChanged, onCurrencyChanged, onEfficiencyUnitChanged, onReloadCache, historyMonths, onHistoryMonthsChanged }: {
@@ -244,7 +245,9 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
           }
           for (const r of allReleases) {
             const date = new Date(r.published_at).toLocaleDateString(locale);
-            const html = await marked.parse(r.body || "");
+            // marked 默认不过滤 HTML：release body 属于外部内容，必须经 DOMPurify 消毒后再注入
+            const rawHtml = await marked.parse(r.body || "");
+            const html = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
             releases.push({ repo: `${repo.owner}${repo.label}`, tag: r.tag_name, date, html });
           }
         } catch (e) {

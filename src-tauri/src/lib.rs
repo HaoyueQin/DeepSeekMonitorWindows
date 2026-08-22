@@ -281,18 +281,8 @@ fn save_history_months(months: u32) -> Result<AppConfig, String> {
     Ok(config::to_app_config(config)?)
 }
 
-#[tauri::command]
-fn export_config_json() -> Result<String, String> {
-    let config = config::read_stored_config()?;
-    serde_json::to_string_pretty(&config).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn import_config_json(json: String) -> Result<AppConfig, String> {
-    let config: config::StoredConfig = serde_json::from_str(&json).map_err(|e| format!("JSON 解析失败: {}", e))?;
-    config::write_stored_config(&config)?;
-    Ok(config::to_app_config(config)?)
-}
+// 说明：曾有的 export/import_config_json 命令已删除——前端零调用，且 export 会把
+// DPAPI 解密后的明文凭据经 IPC 送出；登录窗口的远程页面具备 IPC 能力，属于多余的攻击面。
 
 /// 余额低于阈值时发送 Windows 通知（DeepSeek 与 MiMo 共用）
 fn notify_low_balance_if_needed(balance_str: &str, currency: &str) {
@@ -523,9 +513,7 @@ pub fn run() {
             ensure_mimo_webview,
             mimo_api_response,
             check_update,
-            install_update,
-            export_config_json,
-            import_config_json
+            install_update
         ])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
