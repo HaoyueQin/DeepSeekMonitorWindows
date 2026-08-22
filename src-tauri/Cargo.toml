@@ -32,4 +32,3 @@ tiny_http = "0.12"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["sync"] }
 winreg = "0.55"
-tauri-plugin-dialog = "2.7.1"

@@ -685,11 +685,11 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         try {
           const parsed = JSON.parse(val);
           if (usageMatch && typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { days?: unknown[] }).days)) {
-            const usage = parsed as { days: Array<{ date: string; totalTokens?: number; totalCost?: number; flashCacheHit?: number; flashCacheMiss?: number; flashResponse?: number; proCacheHit?: number; proCacheMiss?: number; proResponse?: number; models?: Array<{ cacheHitTokens?: number; cacheMissTokens?: number; responseTokens?: number }> }> };
+            const usage = parsed as { days: Array<{ date: string; totalTokens?: number; totalCost?: number; flashCacheHit?: number; flashCacheMiss?: number; flashResponse?: number; visionCacheHit?: number; visionCacheMiss?: number; visionResponse?: number; proCacheHit?: number; proCacheMiss?: number; proResponse?: number; models?: Array<{ cacheHitTokens?: number; cacheMissTokens?: number; responseTokens?: number }> }> };
             for (const day of usage.days) {
-              const hit = (day.flashCacheHit ?? 0) + (day.proCacheHit ?? 0) + (day.models?.reduce((s, m) => s + (m.cacheHitTokens ?? 0), 0) ?? 0);
-              const miss = (day.flashCacheMiss ?? 0) + (day.proCacheMiss ?? 0) + (day.models?.reduce((s, m) => s + (m.cacheMissTokens ?? 0), 0) ?? 0);
-              const response = (day.flashResponse ?? 0) + (day.proResponse ?? 0) + (day.models?.reduce((s, m) => s + (m.responseTokens ?? 0), 0) ?? 0);
+              const hit = (day.flashCacheHit ?? 0) + (day.visionCacheHit ?? 0) + (day.proCacheHit ?? 0) + (day.models?.reduce((s, m) => s + (m.cacheHitTokens ?? 0), 0) ?? 0);
+              const miss = (day.flashCacheMiss ?? 0) + (day.visionCacheMiss ?? 0) + (day.proCacheMiss ?? 0) + (day.models?.reduce((s, m) => s + (m.cacheMissTokens ?? 0), 0) ?? 0);
+              const response = (day.flashResponse ?? 0) + (day.visionResponse ?? 0) + (day.proResponse ?? 0) + (day.models?.reduce((s, m) => s + (m.responseTokens ?? 0), 0) ?? 0);
               rows.push([key, day.date, String(day.totalTokens ?? 0), String(day.totalCost ?? 0), String(hit), String(miss), String(response)]);
             }
           } else if (typeof parsed === 'object' && parsed !== null) {
@@ -770,16 +770,8 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
         </div>
         <p className="muted">{t('settings.export_range_desc')}</p>
         <div className="settings-actions">
-          <button className="secondary" onClick={async () => {
-            const { save } = await import("@tauri-apps/plugin-dialog");
-            const ext = exportFormat === "json" ? "json" : "csv";
-            const filePath = await save({
-              defaultPath: `dsm-data-${exportPlatform}.${ext}`,
-              filters: [{ name: exportFormat.toUpperCase(), extensions: [ext] }]
-            });
-            if (!filePath) return;
-            handleExport();
-          }}>{tpl('settings.export_btn', { fmt: exportFormat.toUpperCase() })}</button>
+          {/* 说明：此前这里会先弹系统保存对话框，但选中的路径从未被使用（实际走浏览器下载），误导用户。 */}
+          <button className="secondary" onClick={() => handleExport()}>{tpl('settings.export_btn', { fmt: exportFormat.toUpperCase() })}</button>
         </div>
       </SettingsSection>
       <SettingsSection icon={<Settings size={15} />} title={t('settings.import_title')}>

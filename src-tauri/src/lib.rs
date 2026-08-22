@@ -284,8 +284,12 @@ fn save_history_months(months: u32) -> Result<AppConfig, String> {
 // 说明：曾有的 export/import_config_json 命令已删除——前端零调用，且 export 会把
 // DPAPI 解密后的明文凭据经 IPC 送出；登录窗口的远程页面具备 IPC 能力，属于多余的攻击面。
 
-/// 余额低于阈值时发送 Windows 通知（DeepSeek 与 MiMo 共用）
-fn notify_low_balance_if_needed(balance_str: &str, currency: &str) {
+/// 低余额通知的冷却状态：记录上次发送时刻（DeepSeek 与 MiMo 共用）
+type NotifyCooldownState = std::sync::Mutex<Option<std::time::Instant>>;
+
+/// 余额低于阈值时发送 Windows 通知（DeepSeek 与 MiMo 共用）。
+/// 受 notify_cooldown_minutes 冷却约束——该配置项此前只存不用，每次刷新都会重复弹窗。
+fn notify_low_balance_if_needed(balance_str: &str, currency: &str, last_notify: &NotifyCooldownState) {
     let config = match config::read_stored_config() {
         Ok(c) => c,
         Err(_) => return,
@@ -300,15 +304,30 @@ fn notify_low_balance_if_needed(balance_str: &str, currency: &str) {
     let Ok(balance_val) = balance_str.parse::<f64>() else {
         return;
     };
-    if balance_val < threshold {
-        let symbol = if currency == "USD" { "$" } else { "¥" };
-        let _ = notify_rust::Notification::new()
-            .summary("DeepSeek / MiMo Monitor")
-            .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, balance_str, symbol, threshold))
-            .appname("DeepSeekMonitor")
-            .show();
-        log::info!("[Notify] 余额不足: {}{} < {}{}", symbol, balance_str, symbol, threshold);
+    if balance_val >= threshold {
+        // 恢复到阈值之上时重置冷却，让下一次跌破能立即提醒
+        if let Ok(mut last) = last_notify.lock() {
+            *last = None;
+        }
+        return;
     }
+    // 冷却检查：cooldown > 0 时窗口内不重复打扰；0 = 每次都提醒
+    if config.notify_cooldown_minutes > 0 {
+        let mut last = last_notify.lock().unwrap();
+        if let Some(t) = *last {
+            if t.elapsed() < std::time::Duration::from_secs(config.notify_cooldown_minutes * 60) {
+                return;
+            }
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    let symbol = if currency == "USD" { "$" } else { "¥" };
+    let _ = notify_rust::Notification::new()
+        .summary("DeepSeek / MiMo Monitor")
+        .body(&format!("余额不足提醒：当前余额 {}{}，低于阈值 {}{}", symbol, balance_str, symbol, threshold))
+        .appname("DeepSeekMonitor")
+        .show();
+    log::info!("[Notify] 余额不足: {}{} < {}{}", symbol, balance_str, symbol, threshold);
 }
 
 #[tauri::command]
@@ -323,9 +342,9 @@ fn set_provider(provider: String) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-async fn fetch_balance() -> Result<BalanceResult, String> {
+async fn fetch_balance(notify_state: tauri::State<'_, NotifyCooldownState>) -> Result<BalanceResult, String> {
     let result = deepseek::do_fetch_balance().await?;
-    notify_low_balance_if_needed(&result.total_balance, &result.currency);
+    notify_low_balance_if_needed(&result.total_balance, &result.currency, &notify_state);
     Ok(result)
 }
 
@@ -360,9 +379,12 @@ async fn fetch_usage(month: u32, year: u32) -> Result<UsageResult, String> {
 }
 
 #[tauri::command]
-async fn fetch_mimo_balance(app: tauri::AppHandle) -> Result<MimoBalanceResult, String> {
+async fn fetch_mimo_balance(
+    app: tauri::AppHandle,
+    notify_state: tauri::State<'_, NotifyCooldownState>,
+) -> Result<MimoBalanceResult, String> {
     let result = mimo::do_fetch_mimo_balance(&app).await?;
-    notify_low_balance_if_needed(&result.available_balance, &result.currency);
+    notify_low_balance_if_needed(&result.available_balance, &result.currency, &notify_state);
     Ok(result)
 }
 
@@ -480,6 +502,7 @@ pub fn run() {
         .manage(Mutex::new(MimoDetailCache::new()))
         .manage(Mutex::new(CallbackServerPort(0)))
         .manage(PendingUpdate(std::sync::Mutex::new(None)))
+        .manage(NotifyCooldownState::new(None))
         .invoke_handler(tauri::generate_handler![
             hide_main_window,
             resize_window,
@@ -517,7 +540,6 @@ pub fn run() {
         ])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

@@ -169,6 +169,8 @@ function App() {
   const [provider, setProviderState] = React.useState<Provider>("deepseek");
   const [data, dispatch] = React.useReducer(dataReducer, initialDataState);
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = React.useState(60);
+  // MiMo 专属刷新间隔（0 = 跟随全局）。此前该配置只存不用，自动刷新 timer 从未消费它。
+  const [mimoRefreshIntervalSeconds, setMimoRefreshIntervalSeconds] = React.useState(0);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = React.useState(false);
   const [currency, setCurrency] = React.useState<"cny" | "usd">("cny");
   const [exchangeRate, setExchangeRate] = React.useState<number>(0.137);
@@ -325,12 +327,13 @@ function App() {
     } catch { /* 静默失败 */ }
   }, [historyMonths]);
 
-  // auto-refresh 只刷新余额和当月用量，不重拉历史
+  // auto-refresh 只刷新余额和当月用量，不重拉历史；MiMo 使用其专属间隔（未设置时跟随全局）
   React.useEffect(() => {
     if (!autoRefreshEnabled) return;
-    const timer = window.setInterval(() => { loadBalance(); refreshCurrentMonth(); }, refreshIntervalSeconds * 1000);
+    const seconds = provider === "mimo" && mimoRefreshIntervalSeconds > 0 ? mimoRefreshIntervalSeconds : refreshIntervalSeconds;
+    const timer = window.setInterval(() => { loadBalance(); refreshCurrentMonth(); }, seconds * 1000);
     return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, loadBalance, refreshCurrentMonth, refreshIntervalSeconds]);
+  }, [autoRefreshEnabled, loadBalance, refreshCurrentMonth, refreshIntervalSeconds, provider, mimoRefreshIntervalSeconds]);
 
   // 历史深度变化后重新加载用量（避免 onHistoryMonthsChanged 中闭包读到旧值）
   React.useEffect(() => {
@@ -363,6 +366,7 @@ function App() {
           if (startProvider !== providerRef.current) { dispatch({ type: "RESET" }); }
           providerRef.current = startProvider; setProviderState(startProvider);
           setRefreshIntervalSeconds(config.refreshIntervalSeconds || 60); setAutoRefreshEnabled(config.autoRefreshEnabled);
+          setMimoRefreshIntervalSeconds(config.mimoRefreshIntervalSeconds || 0);
           setCurrency(config.currency || "cny");
           setEfficiencyUnit(config.efficiencyUnit || "currency_per_token");
           setAutoClearOld(config.autoClearOldCache ?? true);

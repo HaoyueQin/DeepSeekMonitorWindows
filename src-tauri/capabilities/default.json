@@ -23,7 +23,6 @@
     "core:event:allow-listen",
     "core:webview:allow-internal-toggle-devtools",
     "updater:default",
-    "process:default",
-    "dialog:default"
+    "process:default"
   ]
 }
