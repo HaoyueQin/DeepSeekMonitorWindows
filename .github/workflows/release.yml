@@ -1,0 +1,74 @@
+name: Release
+
+# 推送 v* 标签即发版：先完整复用 CI 作为门禁（类型检查/单测/构建/cargo test/clippy），
+# 全部通过后才在云端构建安装包与签名更新器产物，并自动创建 GitHub Release。
+# 取代旧的"本地构建 + 手动上传"模式。
+#
+# 一次性配置（仅维护者需要做）：
+#   updater 签名私钥存入仓库 Secrets（公钥已在 tauri.conf.json 中）：
+#     gh secret set TAURI_SIGNING_PRIVATE_KEY < tauri-key.path
+#     gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD "<passphrase，无则留空>"
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  validate:
+    name: Release gate (full CI)
+    uses: ./.github/workflows/ci.yml
+
+  build-release:
+    name: Build & publish release
+    needs: validate
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check updater signing secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY 未配置。请执行："
+            echo "::error::  gh secret set TAURI_SIGNING_PRIVATE_KEY < 私钥文件"
+            echo "::error::  gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD '<口令>'"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11 (match local lock generation)
+        run: npm install -g npm@11
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build & publish release (NSIS + updater artifacts)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "DeepSeek / MiMo Monitor v__VERSION__"
+          releaseBody: "完整变更见 Changelog（应用内 关于 → 查看更新日志）。Windows 用户可直接运行安装包；应用内更新走内置更新器（latest.json）。"
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterArtifacts: true

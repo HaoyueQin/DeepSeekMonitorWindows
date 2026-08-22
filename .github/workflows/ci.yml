@@ -5,6 +5,8 @@ on:
     branches: [master, dev]
   pull_request:
     branches: [master, dev]
+  # 允许 release 工作流把整套 CI 作为发版前门禁复用
+  workflow_call:
 
 jobs:
   frontend:
