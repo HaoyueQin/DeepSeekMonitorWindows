@@ -23,11 +23,11 @@ A Windows desktop app for monitoring DeepSeek & MiMo API usage: account balance,
 
 ## Screenshots
 
-<!-- TODO(release): replace with real screenshots after installing the release build.
-     Suggested: light + dark shots in docs/images/, e.g.
-     ![Dashboard](docs/images/dashboard-light.png) -->
+| Light mode | Dark mode |
+| --- | --- |
+| ![Dashboard, light mode](screenshots/dashboard-light.png) | ![Dashboard, dark mode](screenshots/dashboard-dark.png) |
 
-> 📷 **Placeholder**: the v2.7 dashboard screenshot will be added here after the official release (three model rows — V4 Flash / V4 Flash Vision / V4 Pro — plus the balance card and 7-day trend chart).
+> Dashboard: balance card, daily / monthly spend, three model rows (V4 Flash · V4 Flash Vision · V4 Pro) and the 7-day trend chart.
 
 ## Features
 

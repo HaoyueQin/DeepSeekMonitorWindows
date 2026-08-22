@@ -23,11 +23,11 @@
 
 ## 效果展示
 
-<!-- TODO(release)：安装正式版后替换为实际截图。建议浅色 + 深色各一张，
-     放入 docs/images/ 并在此引用，例如：
-     ![主面板](docs/images/dashboard-light.png) -->
+| 浅色模式 | 深色模式 |
+| --- | --- |
+| ![浅色模式主面板](screenshots/dashboard-light.png) | ![深色模式主面板](screenshots/dashboard-dark.png) |
 
-> 📷 **截图占位**：v2.7 主面板效果展示图将在正式发版后补充于此（主面板包含 V4 Flash / V4 Flash Vision / V4 Pro 三行模型用量、余额卡片与七日趋势图）。
+> 主面板：账户余额、当日 / 本月消费，V4 Flash · V4 Flash Vision · V4 Pro 三行模型用量与七日趋势图。
 
 ## 功能特性
 
