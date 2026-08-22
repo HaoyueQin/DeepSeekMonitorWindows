@@ -10,6 +10,7 @@ src-tauri/gen/schemas/
 *.md
 *.MD
 !README.md
+!README.en.md
 
 # ---------- Internal docs ----------
 PRD.md
