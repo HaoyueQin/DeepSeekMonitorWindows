@@ -29,6 +29,28 @@ const REQUEST_TIMEOUT_SECS: u64 = 15;
 
 // ─── 余额查询 ────────────────────────────────────────────
 
+#[derive(Deserialize, Clone)]
+struct BalanceInfo {
+    currency: String,
+    total_balance: String,
+    granted_balance: String,
+    topped_up_balance: String,
+}
+#[derive(Deserialize)]
+struct BalanceResponse {
+    is_available: bool,
+    balance_infos: Vec<BalanceInfo>,
+}
+
+/// 多币种条目选择：优先 CNY（国内账户实际计费币种），无 CNY 时回退第一条。
+/// 提为模块级纯函数便于单元测试。
+fn pick_cny_balance_info(infos: &[BalanceInfo]) -> Option<&BalanceInfo> {
+    infos
+        .iter()
+        .find(|info| info.currency.eq_ignore_ascii_case("CNY"))
+        .or_else(|| infos.first())
+}
+
 pub async fn do_fetch_balance() -> Result<BalanceResult, AppError> {
     let config = read_stored_config()?;
     let api_key = config
@@ -55,28 +77,16 @@ pub async fn do_fetch_balance() -> Result<BalanceResult, AppError> {
         code => return Err(AppError::Http(code)),
     }
 
-    #[derive(Deserialize)]
-    struct BalanceInfo {
-        currency: String,
-        total_balance: String,
-        granted_balance: String,
-        topped_up_balance: String,
-    }
-    #[derive(Deserialize)]
-    struct BalanceResponse {
-        is_available: bool,
-        balance_infos: Vec<BalanceInfo>,
-    }
-
     let data: BalanceResponse = response
         .json()
         .await
         .map_err(|error| AppError::Parse(format!("解析余额数据失败：{error}")))?;
 
-    let info = data
-        .balance_infos
-        .into_iter()
-        .next()
+    // DeepSeek /user/balance 现在返回多币种条目（实测 USD 条目排在 CNY 之前，
+    // 取 [0] 会拿到 USD 0.00 导致余额显示错误）。始终优先选 CNY 条目，
+    // 仅在无 CNY 条目（如纯 USD 账户）时回退第一个条目。
+    let info = pick_cny_balance_info(&data.balance_infos)
+        .cloned()
         .ok_or_else(|| AppError::Parse("余额信息为空".to_string()))?;
 
     Ok(BalanceResult {
@@ -519,6 +529,7 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, AppErr
     for model_usage in &amount.data.biz_data.total {
         let label = match model_usage.model.as_str() {
             "deepseek-v4-flash" => Some(("flash", "V4 Flash")),
+            "deepseek-v4-flash-vision-exp" => Some(("flash-vision", "V4 Flash Vision")),
             "deepseek-v4-pro" => Some(("pro", "V4 Pro")),
             _ => None,
         };
@@ -552,6 +563,10 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, AppErr
         let mut flash_hit = 0u64;
         let mut flash_miss = 0u64;
         let mut flash_resp = 0u64;
+        let mut vis = 0u64;
+        let mut vis_hit = 0u64;
+        let mut vis_miss = 0u64;
+        let mut vis_resp = 0u64;
         let mut pro = 0u64;
         let mut pro_hit = 0u64;
         let mut pro_miss = 0u64;
@@ -566,6 +581,12 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, AppErr
                     flash_hit += hit;
                     flash_miss += miss;
                     flash_resp += response;
+                }
+                "deepseek-v4-flash-vision-exp" => {
+                    vis += tokens;
+                    vis_hit += hit;
+                    vis_miss += miss;
+                    vis_resp += response;
                 }
                 "deepseek-v4-pro" => {
                     pro += tokens;
@@ -582,6 +603,10 @@ pub async fn do_fetch_usage(month: u32, year: u32) -> Result<UsageResult, AppErr
             flash_cache_hit: flash_hit,
             flash_cache_miss: flash_miss,
             flash_response: flash_resp,
+            vision_tokens: vis,
+            vision_cache_hit: vis_hit,
+            vision_cache_miss: vis_miss,
+            vision_response: vis_resp,
             pro_tokens: pro,
             pro_cache_hit: pro_hit,
             pro_cache_miss: pro_miss,
@@ -703,6 +728,38 @@ mod tests {
     fn cost_sum_handles_invalid() {
         let usage = vec![entry("PROMPT_TOKEN", "oops")];
         assert_eq!(cost_sum(&usage), 0.0);
+    }
+
+    fn balance_info(currency: &str, total: &str) -> BalanceInfo {
+        BalanceInfo {
+            currency: currency.to_string(),
+            total_balance: total.to_string(),
+            granted_balance: "0".to_string(),
+            topped_up_balance: total.to_string(),
+        }
+    }
+
+    #[test]
+    fn balance_prefers_cny_entry() {
+        // 实测上游载荷：USD(0.00) 在前、CNY(-2.50) 在后 → 必须选中 CNY
+        let infos = vec![balance_info("USD", "0.00"), balance_info("CNY", "-2.50")];
+        let picked = pick_cny_balance_info(&infos).expect("should pick CNY");
+        assert_eq!(picked.currency, "CNY");
+        assert_eq!(picked.total_balance, "-2.50");
+    }
+
+    #[test]
+    fn balance_falls_back_to_first_without_cny() {
+        let infos = vec![balance_info("USD", "12.34")];
+        let picked = pick_cny_balance_info(&infos).expect("should fall back");
+        assert_eq!(picked.currency, "USD");
+        assert_eq!(picked.total_balance, "12.34");
+    }
+
+    #[test]
+    fn balance_empty_infos_is_none() {
+        let infos: Vec<BalanceInfo> = Vec::new();
+        assert!(pick_cny_balance_info(&infos).is_none());
     }
 
     #[test]

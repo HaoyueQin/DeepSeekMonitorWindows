@@ -92,4 +92,9 @@ describe("modelIcon", () => {
     expect(modelIcon("mimo-v2.5")).toBe("flash");
     expect(modelIcon("flash")).toBe("flash");
   });
+  it("returns vision for vision/image models", () => {
+    expect(modelIcon("flash-vision")).toBe("vision");
+    expect(modelIcon("some-vision-model")).toBe("vision");
+    expect(modelIcon("deepseek-image-input")).toBe("vision");
+  });
 });

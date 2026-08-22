@@ -1,6 +1,6 @@
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BarChart3, Brain, CalendarDays, CreditCard, Settings, Shirt, SunMedium, X, Zap, RefreshCw } from "lucide-react";
+import { BarChart3, Brain, CalendarDays, CreditCard, Image as ImageIcon, Settings, Shirt, SunMedium, X, Zap, RefreshCw } from "lucide-react";
 import type { Provider, BalanceData, MimoBalanceData, BalanceState, UsageResult, MimoUsageResult, MimoUsageModel, UsageModel, AppConfig } from "../types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, todayStr, dateKey, addDays, modelDisplayName, modelIcon } from "../utils";
 import { t, tpl } from "../i18n";
@@ -66,8 +66,8 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
   exchangeRate?: number;
   efficiencyUnit?: "token_per_currency" | "currency_per_token";
 }) {
-  const isFlash = modelKey === "flash";
-  const name = modelDisplay ?? (isFlash ? "V4 Flash" : "V4 Pro");
+  const kind = modelIcon(modelKey);
+  const name = modelDisplay ?? (kind === "flash" ? "V4 Flash" : kind === "vision" ? "V4 Flash Vision" : "V4 Pro");
   const tokensText = data ? `${fmtInt(data.totalTokens)} ${t("app.tokens")}`
     : state === "loading" ? t("app.loading")
     : state === "nokey" ? t("app.unconfigured_token")
@@ -84,17 +84,21 @@ export function UsageRow({ modelKey, data, maxTokens, state, onClick, modelDispl
 
   return (
     <button className="card usage-row" onClick={onClick}>
-      <div className={`model-badge ${isFlash ? "flash" : "pro"}`}>
-        {isFlash ? <Zap size={27} fill="currentColor" /> : <Brain size={25} />}
+      <div className={`model-badge ${kind}`}>
+        {kind === "flash"
+          ? <Zap size={27} fill="currentColor" />
+          : kind === "vision"
+            ? <ImageIcon size={26} />
+            : <Brain size={25} />}
       </div>
       <div className="usage-main">
         <h2>{name}</h2>
         <div className="token-line">
           <span>{tokensText}</span>
-          <div className="progress-track"><i className={isFlash ? "flash-fill" : "pro-fill"} style={{ width }} /></div>
+          <div className="progress-track"><i className={`${kind}-fill`} style={{ width }} /></div>
         </div>
         {data && data.cacheHitTokens + data.cacheMissTokens > 0 && (
-          <span className={`cache-hit-rate ${isFlash ? "flash" : "pro"}`}>
+          <span className={`cache-hit-rate ${kind}`}>
             {t("usage.cache_hit")} {((data.cacheHitTokens / (data.cacheHitTokens + data.cacheMissTokens)) * 100).toFixed(3)}%
           </span>
         )}
@@ -136,9 +140,9 @@ export function UsageChart({ usage, state, error, provider, currency, exchangeRa
     if (isDeepSeek) {
       const d = dsMap.get(date);
       if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0, cost: 0 };
-      const hit = d.flashCacheHit + d.proCacheHit;
-      const miss = d.flashCacheMiss + d.proCacheMiss;
-      const response = d.flashResponse + d.proResponse;
+      const hit = d.flashCacheHit + (d.visionCacheHit ?? 0) + d.proCacheHit;
+      const miss = d.flashCacheMiss + (d.visionCacheMiss ?? 0) + d.proCacheMiss;
+      const response = d.flashResponse + (d.visionResponse ?? 0) + d.proResponse;
       return { date, hit, miss, response, total: hit + miss + response, cost: d.totalCost };
     } else {
       const d = mimoMap.get(date);
@@ -241,6 +245,9 @@ const MIMO_DEFAULT_MODELS: MimoUsageModel[] = [
   { key: "mimo-v2.5-pro", name: "MiMo-V2.5-Pro", totalTokens: 0, requestCount: 0, cacheHitTokens: 0, cacheMissTokens: 0, responseTokens: 0, cost: 0 },
 ];
 
+// DeepSeek 主面板固定行序：Flash → Flash Vision → Pro（新模型 deepseek-v4-flash-vision-exp）
+const DS_ROW_KEYS = ["flash", "flash-vision", "pro"] as const;
+
 // ─── DashboardPanel ────────────────────────────────────────
 export function DashboardPanel({ provider, onProviderChange, balance, balanceState, balanceError, usage, usageState, usageError, onRefresh, onClose, onSettings, onDetail, currency, exchangeRate, efficiencyUnit }: {
   provider: Provider;
@@ -268,9 +275,8 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
   const isDeepSeek = provider === "deepseek";
   const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
   const mimoUsage = !isDeepSeek ? (usage as MimoUsageResult | null) : null;
-  const flash = dsUsage?.models.find((item) => item.key === "flash") ?? null;
-  const pro = dsUsage?.models.find((item) => item.key === "pro") ?? null;
-  const maxTokens = Math.max(flash?.totalTokens ?? 0, pro?.totalTokens ?? 0, ...(mimoUsage?.models.map((m) => m.totalTokens) ?? []), 1);
+  const dsModelTokens = (key: string) => dsUsage?.models.find((item) => item.key === key)?.totalTokens ?? 0;
+  const maxTokens = Math.max(dsModelTokens("flash"), dsModelTokens("flash-vision"), dsModelTokens("pro"), ...(mimoUsage?.models.map((m) => m.totalTokens) ?? []), 1);
   const today = dsUsage?.days.find((day) => day.date === todayStr()) ?? null;
   const mimoToday = mimoUsage?.days.find((day) => day.date === todayStr()) ?? null;
   const todayCost = usageState === "ok" ? (isDeepSeek ? (today ? today.totalCost : null) : (mimoToday ? mimoToday.totalCost : null)) : null;
@@ -297,8 +303,10 @@ export function DashboardPanel({ provider, onProviderChange, balance, balanceSta
       <div className="usage-stack">
         {isDeepSeek ? (
           <>
-            <UsageRow modelKey="flash" data={flash ? { ...flash, key: "flash" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("flash")} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
-            <UsageRow modelKey="pro" data={pro ? { ...pro, key: "pro" } : null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail("pro")} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
+            {/* 固定展示顺序：V4 Flash → V4 Flash Vision → V4 Pro；无用量的模型也渲染占位行 */}
+            {DS_ROW_KEYS.map((key) => (
+              <UsageRow key={key} modelKey={key} data={dsUsage?.models.find((item) => item.key === key) ?? null} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(key)} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />
+            ))}
           </>
         ) : topModels.map((m) => (
           <UsageRow key={m.key} modelKey={modelIcon(m.key)} data={{ ...m, key: modelIcon(m.key) }} maxTokens={maxTokens} state={usageState} onClick={() => onDetail(m.key)} modelDisplay={modelDisplayName(m.key)} currency={currency} exchangeRate={exchangeRate} efficiencyUnit={efficiencyUnit} />

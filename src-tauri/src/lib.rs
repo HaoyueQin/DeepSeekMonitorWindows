@@ -555,7 +555,10 @@ pub fn run() {
                 }
                 if let Some(ref c) = config {
                     if let (Some(w), Some(h), Some(x), Some(y)) = (c.window_width, c.window_height, c.window_x, c.window_y) {
-                        // 有保存的状态，恢复
+                        // 有保存的状态，恢复。
+                        // 主面板新增 V4 Flash Vision 用量行后：若用户仍是旧默认尺寸
+                        // (463x660，从未手动调整过窗口)，自动抬升到新默认高度，避免三行挤压。
+                        let h = if w == 463.0 && h == 660.0 { 750.0 } else { h };
                         let _ = window.set_size(tauri::LogicalSize::new(w, h));
                         let _ = window.set_position(tauri::PhysicalPosition::new(x.max(0), y.max(0)));
                         return Ok(());

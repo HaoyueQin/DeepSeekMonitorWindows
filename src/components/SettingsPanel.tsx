@@ -485,7 +485,7 @@ export function SettingsPanel({ provider, onProviderChange, onBack, onUsageLoade
       <SettingsSection icon={<Settings size={15} />} title={t('settings.window_size')}>
         <p>{t('settings.window_desc')}</p>
         <div style={{ display: 'inline-flex', gap: 6, marginTop: 6 }}>
-          {[{ label: t('settings.compact'), w: 380, h: 600 }, { label: t('settings.standard'), w: 463, h: 660 }, { label: t('settings.wide'), w: 600, h: 700 }, { label: t('settings.large'), w: 660, h: 900 }].map((preset) => (
+          {[{ label: t('settings.compact'), w: 380, h: 690 }, { label: t('settings.standard'), w: 463, h: 750 }, { label: t('settings.wide'), w: 600, h: 790 }, { label: t('settings.large'), w: 660, h: 990 }].map((preset) => (
             <button key={preset.label} style={{ border: 0, borderRadius: 8, padding: '8px 14px', background: 'rgba(var(--fg), 0.12)', color: 'var(--text-strong)', fontSize: '0.85em', fontWeight: 600, cursor: 'pointer' }} onClick={() => { void invoke("resize_window", { width: preset.w, height: preset.h }).catch(() => {}); }}>{preset.label}</button>
           ))}
         </div>

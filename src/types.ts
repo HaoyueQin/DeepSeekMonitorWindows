@@ -1,5 +1,5 @@
 export type ViewName = "dashboard" | "settings" | "detail";
-export type ModelName = "flash" | "pro" | (string & {});
+export type ModelName = "flash" | "flash-vision" | "pro" | (string & {});
 export type Provider = "deepseek" | "mimo";
 
 export type AppConfig = {
@@ -52,6 +52,10 @@ export type UsageDay = {
   flashCacheHit: number;
   flashCacheMiss: number;
   flashResponse: number;
+  visionTokens: number;
+  visionCacheHit: number;
+  visionCacheMiss: number;
+  visionResponse: number;
   proTokens: number;
   proCacheHit: number;
   proCacheMiss: number;

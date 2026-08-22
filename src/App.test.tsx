@@ -48,10 +48,11 @@ const usage: UsageResult = {
   monthCost: 12.34,
   models: [
     { key: "flash", name: "V4 Flash", totalTokens: 1000000, requestCount: 10, cacheHitTokens: 600000, cacheMissTokens: 200000, responseTokens: 200000, cost: 1.23 },
+    { key: "flash-vision", name: "V4 Flash Vision", totalTokens: 250000, requestCount: 3, cacheHitTokens: 150000, cacheMissTokens: 50000, responseTokens: 50000, cost: 0.21 },
     { key: "pro", name: "V4 Pro", totalTokens: 500000, requestCount: 5, cacheHitTokens: 300000, cacheMissTokens: 100000, responseTokens: 100000, cost: 4.56 },
   ],
   days: [
-    { date: "2026-06-01", flashTokens: 1000, flashCacheHit: 600, flashCacheMiss: 200, flashResponse: 200, proTokens: 500, proCacheHit: 300, proCacheMiss: 100, proResponse: 100, totalTokens: 1500, totalCost: 0.12 },
+    { date: "2026-06-01", flashTokens: 1000, flashCacheHit: 600, flashCacheMiss: 200, flashResponse: 200, visionTokens: 0, visionCacheHit: 0, visionCacheMiss: 0, visionResponse: 0, proTokens: 500, proCacheHit: 300, proCacheMiss: 100, proResponse: 100, totalTokens: 1500, totalCost: 0.12 },
   ],
 };
 
@@ -76,6 +77,7 @@ describe("App 集成流程", () => {
     // 等待余额与用量渲染
     await waitFor(() => expect(screen.getByText("¥88.66")).toBeInTheDocument());
     expect(screen.getByText("V4 Flash")).toBeInTheDocument();
+    expect(screen.getByText("V4 Flash Vision")).toBeInTheDocument();
     expect(screen.getByText("V4 Pro")).toBeInTheDocument();
     expect(screen.getByText("缓存命中明细")).toBeInTheDocument();
     // 余额与用量命令被调用

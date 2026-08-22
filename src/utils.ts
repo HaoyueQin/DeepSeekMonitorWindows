@@ -47,6 +47,10 @@ export const recentUsageDays = (days: UsageDay[], count = 7): UsageDay[] => {
         flashCacheHit: 0,
         flashCacheMiss: 0,
         flashResponse: 0,
+        visionTokens: 0,
+        visionCacheHit: 0,
+        visionCacheMiss: 0,
+        visionResponse: 0,
         proTokens: 0,
         proCacheHit: 0,
         proCacheMiss: 0,
@@ -71,9 +75,10 @@ export const modelDisplayName = (key: string): string => {
   return map[key] ?? key;
 };
 
-export const modelIcon = (key: string): "flash" | "pro" | "mimo" => {
+export const modelIcon = (key: string): "flash" | "vision" | "pro" => {
   if (key === "mimo-v2.5-pro") return "pro";
   if (key.startsWith("mimo-")) return "flash";
+  if (key === "flash-vision" || key.includes("vision") || key.includes("image")) return "vision";
   if (key.includes("pro")) return "pro";
   return "flash";
 };

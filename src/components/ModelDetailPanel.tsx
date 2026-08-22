@@ -1,5 +1,5 @@
 import React from "react";
-import { Brain, X, Zap } from "lucide-react";
+import { Brain, Image as ImageIcon, X, Zap } from "lucide-react";
 import type { ModelName, BalanceState, UsageResult, MimoUsageResult, Provider } from "../types";
 import { fmtInt, fmtTokensShort, fmtMoney, mmdd, addDays, dateKey, modelDisplayName, modelIcon } from "../utils";
 import { t, tpl } from "../i18n";
@@ -13,15 +13,16 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
   efficiencyUnit?: "token_per_currency" | "currency_per_token";
 }) {
   const isDeepSeek = provider === "deepseek";
-  const isFlash = model === "flash";
+  const kind = modelIcon(model); // "flash" | "vision" | "pro"
+  const isFlash = kind === "flash";
   const mimoUsage = !isDeepSeek ? (usage as MimoUsageResult | null) : null;
   const dsUsage = isDeepSeek ? (usage as UsageResult | null) : null;
 
   let title: string; let tintClass: string; let cost: string; let totalText: string;
   if (isDeepSeek) {
     const data = dsUsage?.models.find((i) => i.key === model) ?? null;
-    title = isFlash ? "V4 Flash" : "V4 Pro";
-    tintClass = isFlash ? "flash" : "pro";
+    title = isFlash ? "V4 Flash" : kind === "vision" ? "V4 Flash Vision" : "V4 Pro";
+    tintClass = kind;
     cost = data ? fmtMoney(data.cost, currency, exchangeRate) : "—";
     totalText = data ? fmtTokensShort(data.totalTokens) : "—";
   } else {
@@ -52,9 +53,9 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
     if (isDeepSeek) {
       const d = dsMap.get(date);
       if (!d) return { date, hit: 0, miss: 0, response: 0, total: 0, cost: 0 };
-      const hit = isFlash ? d.flashCacheHit : d.proCacheHit;
-      const miss = isFlash ? d.flashCacheMiss : d.proCacheMiss;
-      const response = isFlash ? d.flashResponse : d.proResponse;
+      const hit = isFlash ? d.flashCacheHit : kind === "vision" ? (d.visionCacheHit ?? 0) : d.proCacheHit;
+      const miss = isFlash ? d.flashCacheMiss : kind === "vision" ? (d.visionCacheMiss ?? 0) : d.proCacheMiss;
+      const response = isFlash ? d.flashResponse : kind === "vision" ? (d.visionResponse ?? 0) : d.proResponse;
       const total = hit + miss + response;
       // 按 token 占比估算当日该模型成本
       const cost = d.totalTokens > 0 && d.totalCost > 0 ? (total / d.totalTokens) * d.totalCost : 0;
@@ -102,7 +103,11 @@ export function ModelDetailPanel({ model, usage, usageState, onBack, provider, c
       <button className="floating-close" onClick={onBack} aria-label={t("detail.back")}><X size={20} /></button>
       <article className="card detail-hero" data-tauri-drag-region>
         <div className={`model-badge large ${tintClass}`}>
-          {isDeepSeek ? (isFlash ? <Zap size={34} fill="currentColor" /> : <Brain size={33} />) : <Zap size={34} fill="currentColor" />}
+          {isDeepSeek
+            ? (kind === "flash"
+              ? <Zap size={34} fill="currentColor" />
+              : kind === "vision" ? <ImageIcon size={32} /> : <Brain size={33} />)
+            : <Zap size={34} fill="currentColor" />}
         </div>
         <div><h1>{title}</h1><p>{cost} · {t("usage.cache_hit")} {avgHitRate}% · {avgRatio}</p></div>
       </article>

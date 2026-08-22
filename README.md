@@ -15,7 +15,7 @@ DeepSeek / MiMo Monitor Windows: Windows desktop adaptation of felikschu/deepsee
 
 - 查询 DeepSeek API 账户余额，使用 DeepSeek 官方余额接口。
 - 查询 DeepSeek 平台用量数据，包括当月消费、模型 Token 总量、请求数、缓存命中、缓存未命中和输出 Token。
-- 支持 V4 Flash 与 V4 Pro 两类模型用量展示。
+- 支持 V4 Flash、V4 Flash Vision（deepseek-v4-flash-vision-exp）与 V4 Pro 三类模型用量展示。
 - 支持最近 7 天消费趋势图，可按周翻页浏览历史数据。
 - 支持模型详情页，按日 Token 消耗柱状图，同样支持周翻页。
 - 支持 Windows 托盘入口，主窗口默认不进入任务栏。

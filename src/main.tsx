@@ -66,8 +66,18 @@ function mergeDS(months: UsageResult[]): UsageResult {
       if (e) {
         e.totalTokens += d.totalTokens; e.totalCost += d.totalCost;
         e.flashTokens += d.flashTokens; e.flashCacheHit += d.flashCacheHit; e.flashCacheMiss += d.flashCacheMiss; e.flashResponse += d.flashResponse;
+        e.visionTokens += d.visionTokens ?? 0; e.visionCacheHit += d.visionCacheHit ?? 0; e.visionCacheMiss += d.visionCacheMiss ?? 0; e.visionResponse += d.visionResponse ?? 0;
         e.proTokens += d.proTokens; e.proCacheHit += d.proCacheHit; e.proCacheMiss += d.proCacheMiss; e.proResponse += d.proResponse;
-      } else { daysMap.set(d.date, { ...d }); }
+      } else {
+        // 旧版本本地缓存可能缺 vision 字段，这里兜底补 0，避免合并后出现 NaN
+        daysMap.set(d.date, {
+          ...d,
+          visionTokens: d.visionTokens ?? 0,
+          visionCacheHit: d.visionCacheHit ?? 0,
+          visionCacheMiss: d.visionCacheMiss ?? 0,
+          visionResponse: d.visionResponse ?? 0,
+        });
+      }
     }
   }
   return {
