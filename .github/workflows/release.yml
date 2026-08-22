@@ -71,4 +71,4 @@ jobs:
           releaseBody: "完整变更见 Changelog（应用内 关于 → 查看更新日志）。Windows 用户可直接运行安装包；应用内更新走内置更新器（latest.json）。"
           releaseDraft: false
           prerelease: false
-          includeUpdaterArtifacts: true
+          includeUpdaterJson: true
